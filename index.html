@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR" data-portal-loading="true">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#FFD400" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Rodovar" />
+    <meta name="application-name" content="RODOVAR CONECTA" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png" />
+    <link rel="stylesheet" href="/portal-loading.css" />
+    <link rel="preload" as="image" href="/assets/loading/mascote.png" />
+    <title>RODOVAR CONECTA — Portal de Comunicação Interna e Pagamentos de Fretes</title>
+    <meta name="description" content="Portal corporativo de comunicação interna, fretes ativos, recebimento de comprovantes bancários e solicitações da RODOVAR." />
+    <meta property="og:title" content="RODOVAR CONECTA — Portal de Comunicação Interna" />
+    <meta property="og:description" content="Portal corporativo de comunicação interna, fretes ativos, recebimento de comprovantes bancários e solicitações da RODOVAR." />
+    <script>
+      (function () {
+        window.__rodovarDeferredPrompt = null;
+        window.__rodovarAppInstalled = false;
+        window.addEventListener('beforeinstallprompt', function (e) {
+          e.preventDefault();
+          window.__rodovarDeferredPrompt = e;
+          window.dispatchEvent(new CustomEvent('rodovar:beforeinstallprompt', { detail: e }));
+        });
+        window.addEventListener('appinstalled', function () {
+          window.__rodovarDeferredPrompt = null;
+          window.__rodovarAppInstalled = true;
+          window.dispatchEvent(new CustomEvent('rodovar:appinstalled'));
+        });
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:ital,wght@0,700;0,800;0,900;1,800;1,900&display=swap" rel="stylesheet">
+  
+  </head>
+  <body>
+    <div id="portal-loading" role="status" aria-live="polite" aria-label="Preparando seu ambiente...">
+      <div class="portal-loading-content">
+        <img class="portal-loading-mascot" src="/assets/loading/mascote.png" alt="Mascote oficial Rodovar" width="520" height="466" fetchpriority="high" />
+        <p>Preparando seu ambiente...</p>
+        <div class="portal-loading-track" aria-hidden="true"><span></span></div>
+      </div>
+    </div>
+    <noscript><style>#portal-loading{display:none}</style><p>Ative o JavaScript para utilizar o RODOVAR CONECTA.</p></noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

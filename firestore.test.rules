@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed(){return request.auth != null;}
+  function profile(){return get(/databases/$(database)/documents/portalUsers/$(request.auth.uid)).data;}
+  function active(){return signed() && exists(/databases/$(database)/documents/portalUsers/$(request.auth.uid)) && profile().active == true && profile().approvalStatus == 'APROVADO' && (profile().accessLevel != 'ADMINISTRADOR' || request.auth.uid == 'test-master');}
+  function master(){return active() && request.auth.uid == 'test-master' && profile().accessLevel == 'ADMINISTRADOR';}
+  function role(r){return active() && profile().accessProfile == r;}
+  match /portalUsers/{uid}{allow read: if active() && (request.auth.uid == uid || master());allow write: if false;}
+  match /preferences/{uid}{allow read: if active() && (request.auth.uid == uid || master());allow write: if false;}
+  match /requests/{id}{allow read: if active() && (master() || resource.data.requesterId == request.auth.uid || role('RH') && resource.data.targetDepartment == 'RH' || role('FINANCEIRO') && resource.data.targetDepartment == 'Financeiro');allow write: if false;}
+  match /freights/{id}{allow read: if active() && (master() || profile().accessProfile in ['DIRETORIA','MONITORAMENTO','FINANCEIRO'] || role('COMERCIAL') && resource.data.comercialResponsavelId == request.auth.uid || role('EXPEDICAO') && resource.data.expedicaoResponsavelId == request.auth.uid);allow write: if false;}
+  match /financial/{id}{allow read: if master() || role('DIRETORIA') || role('FINANCEIRO');allow write: if false;}
+  match /hrPrivate/{id}{allow read: if active() && (master() || resource.data.ownerId == request.auth.uid || role('RH') && resource.data.sharedWithRh == true);allow write: if false;}
+  match /notifications/{id}{allow read: if active() && resource.data.recipientId == request.auth.uid;allow write: if false;}
+  match /audit/{id}{allow read: if master();allow write: if false;}
+  match /{document=**}{allow read,write: if false;}
+ }
+}

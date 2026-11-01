@@ -1,0 +1,50 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "fretes_unificados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "comercialResponsavelId", "order": "ASCENDING" },
+        { "fieldPath": "situacaoComercial", "order": "ASCENDING" },
+        { "fieldPath": "updatedAtIso", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fretes_unificados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "comercialResponsavelId", "order": "ASCENDING" },
+        { "fieldPath": "dataColetaIso", "order": "ASCENDING" },
+        { "fieldPath": "updatedAtIso", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fretes_unificados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "expedicaoResponsavelId", "order": "ASCENDING" },
+        { "fieldPath": "situacaoOperacional", "order": "ASCENDING" },
+        { "fieldPath": "updatedAtIso", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fretes_unificados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "expedicaoResponsavelId", "order": "ASCENDING" },
+        { "fieldPath": "dataColetaIso", "order": "ASCENDING" },
+        { "fieldPath": "updatedAtIso", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fretes_unificados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "situacaoOperacional", "order": "ASCENDING" },
+        { "fieldPath": "expedicaoResponsavelId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAtIso", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

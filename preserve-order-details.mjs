@@ -1,0 +1,2 @@
+import fs from 'node:fs';
+const p='src/components/FinanceiroFretesView.tsx';const original=fs.readFileSync('restore-points/attendance-print-1793483578751/FinanceiroFretesView.tsx.bak','utf8');let count=0;const updated=original.replace(/<button\b[\s\S]*?<\/button>/g,button=>{if(/window\.print\(/.test(button)){count++;return '';}return button.replace('Abrir Detalhes Completos da Ordem de Carregamento e Imprimir PDF A4','Abrir Detalhes Completos da Ordem de Carregamento');});fs.writeFileSync(p,updated);console.log(count+' impressão removida, botão de detalhes preservado');

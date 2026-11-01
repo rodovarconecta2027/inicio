@@ -1,0 +1,2 @@
+import fs from 'node:fs';
+let s=fs.readFileSync('attendance-print-update.mjs','utf8');const start=s.indexOf("const ast=ts.createSourceFile");const end=s.indexOf("fs.writeFileSync(p,s);console.log",start);s=s.slice(0,start)+`let count=0;s=s.replace(/<button\\b[\\s\\S]*?<\\/button>/g,button=>{if(/imprimir|window\\.print\\(/i.test(button)){count++;return '';}return button;});const removals=Array(count);`+s.slice(end);fs.writeFileSync('attendance-print-update.mjs',s);
