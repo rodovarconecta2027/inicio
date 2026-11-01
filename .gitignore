@@ -1,0 +1,42 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Runtime data, accounts, sessions, private documents and local restore points
+/data/
+/uploads/
+/public/uploads/
+/outputs/
+/restore-points/
+/.aistudio/
+/.vercel/
+/.firebase/
+*.bak
+*.tmp
+*.pem
+*.key
+*service-account*.json
+*serviceAccount*.json
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+/original-ModulesView.txt
+/typecheck.txt
+/visual-typecheck.txt
+
+# Local emulator runtime and disposable fixtures
+/tools/
+/.firebase-test-data/
+/firebase-test.env
+/scripts/firewall-result.json
+
+# Legacy AI Studio/Firebase project metadata: retained locally, never versioned.
+/firebase-applet-config.json
+/firebase-blueprint.json
+/firestore.rules
+/storage.rules

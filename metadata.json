@@ -1,0 +1,8 @@
+{
+  "name": "Remix RODOVAR CONECTA",
+  "description": "Plataforma corporativa de comunicação interna, mural de comunicados, solicitações com SLA de 48h, agenda, documentos e chat da transportadora RODOVAR.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,134 @@
+.rv-login-shell { position: relative; isolation: isolate; display: flex; flex-direction: column; min-height: 100dvh; overflow: hidden; background: #03090c; color: #fff; }
+.rv-login-scene { position: absolute; z-index: -2; top: 85px; bottom: 58px; left: 0; width: 68%; overflow: hidden; pointer-events: none; }
+.rv-login-scene img { width: 100%; height: 100%; object-fit: cover; object-position: 34% center; }
+.rv-login-scene::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg,#02090de8 0%,#02090d8c 24%,transparent 49%,transparent 90%,#03090c 100%),linear-gradient(0deg,#03090c 0%,#03090c80 10%,transparent 23%,transparent 87%,#03090c33); }
+.rv-login-shell::before { content: ''; position: absolute; z-index: -3; inset: 0; background: radial-gradient(ellipse at 88% 38%,#80612b1a,transparent 42%); }
+.rv-login-topbar { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 24px; width: 100%; min-height: 86px; margin-inline: auto; padding: 12px clamp(22px,2.65vw,50px); border-bottom: 1px solid #ffffff0e; background: linear-gradient(100deg,#020b12ed,#080c10e6); }
+.rv-login-brand { display: flex; align-items: center; gap: 34px; min-width: 0; }
+.rv-login-logo { flex-shrink: 0; }
+.rv-login-logo svg { width: clamp(160px,12.5vw,224px); height: auto; }
+.rv-login-logo > div > div { font-size: 9px; margin-top: 5px; }
+.rv-login-tagline { display: flex; align-items: center; gap: clamp(10px,1.2vw,21px); padding-left: 32px; border-left: 1px solid #ffffff25; font-size: clamp(9px,.75vw,12px); font-weight: 750; letter-spacing: .08em; white-space: nowrap; }
+.rv-login-tagline i { color: #ffd400; font-style: normal; }
+.rv-login-top-actions { display: flex; align-items: center; flex-shrink: 0; gap: 12px; }
+.rv-login-install { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 8px 14px; border: 1px solid #f2cc00; border-radius: 10px; background: linear-gradient(#ffdc08,#ffd000); color: #070b0d; font-size: 12px; font-weight: 850; white-space: nowrap; cursor: pointer; transition: filter .15s; }
+.rv-login-install:hover { filter: brightness(1.07); }
+.rv-login-protected { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 8px 13px; border: 1px solid #9d801b; border-radius: 10px; background: #080d0e99; color: #ffd400; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.rv-login-main { display: grid; grid-template-columns: minmax(0,1fr) minmax(420px,36.5%); align-items: center; flex: 1; gap: 28px; width: 100%; max-width: 1840px; margin-inline: auto; padding: 36px clamp(24px,1.6vw,36px) 30px clamp(28px,2.65vw,50px); }
+.rv-login-visual { position: relative; align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; min-height: 650px; padding: 24px 10px 12px 0; }
+.rv-login-copy { max-width: 440px; }
+.rv-login-official { display: inline-flex; align-items: center; gap: 13px; min-height: 63px; margin-bottom: 20px; padding: 13px 20px; border: 1px solid #ffffff24; border-radius: 16px; background: #060d12b8; backdrop-filter: blur(8px); }
+.rv-login-official > svg { flex-shrink: 0; color: #ffd400; }
+.rv-login-official strong { display: block; color: #ffd400; font-size: 13px; font-weight: 850; }
+.rv-login-official span { display: block; margin-top: 1px; color: #bac5d3; font-size: 10px; letter-spacing: .025em; }
+.rv-login-headline { margin: 0; color: #fff; font-family: var(--font-sans); font-size: clamp(38px,3.1vw,58px); font-weight: 900; line-height: 1.08; letter-spacing: -.055em; text-transform: uppercase; text-shadow: 0 3px 16px #0005; }
+.rv-login-headline span { display: block; }
+.rv-login-headline .rv-login-gold { color: #ffd400; }
+.rv-login-intro { max-width: 355px; margin-top: 16px; color: #e2e8ef; font-size: clamp(12px,.95vw,16px); line-height: 1.5; font-weight: 450; text-shadow: 0 2px 10px #000; }
+.rv-login-benefits { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 18px; margin-top: 130px; padding: 12px 0 4px 10px; list-style: none; }
+.rv-login-benefit { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.rv-login-benefit + .rv-login-benefit { padding-left: 17px; border-left: 1px solid #ffffff26; }
+.rv-login-benefit-icon { display: grid; place-items: center; flex-shrink: 0; width: 54px; height: 60px; border: 1px solid #9774148c; border-radius: 14px; background: linear-gradient(140deg,#0d1011e8,#080b0daa); color: #ffd400; box-shadow: inset 0 0 18px #ffd40004; }
+.rv-login-benefit strong { display: block; color: #fff; font-size: 11px; line-height: 1.3; font-weight: 850; }
+.rv-login-benefit p { margin-top: 6px; color: #c3cedb; font-size: 12px; line-height: 1.5; }
+.rv-login-card { position: relative; min-width: 0; overflow: hidden; padding: clamp(26px,2.15vw,40px); border: 1px solid #ffffff1c; border-radius: 28px; background: radial-gradient(ellipse at 100% 0%,#77624112,transparent 55%),linear-gradient(135deg,#020d12fa,#0a0e10fc 70%,#100f0cfa); box-shadow: 0 20px 65px #0006,inset 0 0 30px #ffffff02; }
+.rv-login-card::before { content: ''; position: absolute; top: 0; left: 13%; right: 13%; height: 3px; background: linear-gradient(90deg,transparent,#ffd400 30%,#ffd400 70%,transparent); }
+.rv-login-form { display: flex; flex-direction: column; gap: 22px; }
+.rv-login-panel-heading { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 26px; }
+.rv-login-lock-mark { display: grid; place-items: center; flex-shrink: 0; width: 64px; height: 70px; border: 1px solid #ffffff15; border-radius: 16px; background: linear-gradient(160deg,#5c4c13a3,#10191e 65%); color: #ffd400; box-shadow: inset 0 1px 0 #ffd40055; }
+.rv-login-mode { display: inline-flex; align-items: center; gap: 4px; margin: -3px 0 5px; color: #b4bec8; font-size: 9px; font-weight: 700; letter-spacing: .04em; cursor: pointer; }
+.rv-login-mode:hover { color: #ffd400; }
+.rv-login-panel-heading h2 { margin: 0; color: #fff; font-size: clamp(19px,1.45vw,26px); font-weight: 850; line-height: 1.25; letter-spacing: -.035em; }
+.rv-login-panel-heading p { margin-top: 6px; color: #b4c0d0; font-size: 14px; line-height: 1.6; font-weight: 400; }
+.rv-login-form label { color: #f1f5f9; font-size: 14px; line-height: 1.5; font-weight: 750; }
+.rv-login-input-wrap { position: relative; }
+.rv-login-input-icon { position: absolute; z-index: 1; top: 50%; left: 17px; width: 19px; height: 19px; transform: translateY(-50%); color: #b6c0cc; pointer-events: none; }
+.rv-login-form input[type="text"], .rv-login-form input[type="password"] { display: block; width: 100%; min-height: 54px; padding: 14px 44px 14px 49px; border: 1px solid #ffffff29; border-radius: 12px; background: linear-gradient(110deg,#1d2831f0,#292d30e0); color: #f8fafc; font-size: 14px; font-weight: 450; line-height: 1.5; outline: none; box-shadow: inset 0 1px 3px #0003; transition: border-color .15s,box-shadow .15s; }
+.rv-login-form input::placeholder { color: #9daab9; opacity: 1; }
+.rv-login-form input:focus { border-color: #e0ba0a; box-shadow: 0 0 0 3px #ffd40018; }
+.rv-login-form input:disabled { opacity: .6; }
+.rv-login-form input:-webkit-autofill { -webkit-text-fill-color: #f8fafc; transition: background-color 9999s; caret-color: #fff; }
+.rv-login-input-wrap > button { display: grid; place-items: center; width: 38px; height: 38px; right: 7px; color: #c5cbd2; }
+.rv-login-input-wrap > button:hover { color: #ffd400; }
+.rv-login-form label:has(input[type="checkbox"]) { gap: 10px; color: #f1f5f9; font-size: 13px; font-weight: 500; }
+.rv-login-form input[type="checkbox"] { flex-shrink: 0; width: 19px; height: 19px; accent-color: #ffd400; cursor: pointer; }
+.rv-login-submit { min-height: 56px; border: 1px solid #ffe154; border-radius: 14px; background: linear-gradient(100deg,#ffda00,#ffd000); color: #060b0e; font-size: 16px; font-weight: 900; letter-spacing: .015em; box-shadow: 0 4px 22px #ffd4000c,inset 0 1px 0 #fff7; }
+.rv-login-submit:hover:not(:disabled) { background: #ffe132; box-shadow: 0 5px 28px #ffd40024; }
+.rv-login-submit:disabled { border-color: #3b424c; background: #283035; color: #98a4b4; box-shadow: none; cursor: not-allowed; }
+.rv-login-restricted { display: flex; justify-content: center; align-items: flex-start; gap: 8px; margin: -2px 0 4px; color: #edf1f6; font-size: 11px; font-weight: 550; line-height: 1.6; text-align: center; }
+.rv-login-restricted svg { flex-shrink: 0; margin-top: 2px; color: #ffd400; }
+.rv-login-trust { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin-top: 26px; padding-top: 22px; border-top: 1px solid #ffffff23; }
+.rv-login-trust-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 10px; border: 1px solid #ffffff10; border-radius: 12px; background: linear-gradient(140deg,#20211ba3,#08141a); color: #ffd400; }
+.rv-login-trust strong { display: block; color: #f8fafc; font-size: 12px; line-height: 1.5; font-weight: 750; }
+.rv-login-trust p { margin-top: 4px; color: #b2bdca; font-size: 11px; line-height: 1.5; }
+.rv-login-card [role="alert"] { border-color: #df73794d; background: #50171d6e; color: #fecdd3; }
+.rv-login-card [role="alert"] p { color: #fecdd3; }
+.rv-login-card [role="status"] { border-color: #e9c34b66; background: #4e3b1d80; color: #f8df9d; }
+.rv-login-footer { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; min-height: 58px; padding: 16px clamp(22px,2.65vw,50px); border-top: 1px solid #ffffff28; background: #020a0fe0; color: #bdc7d4; font-size: 11px; }
+.rv-login-footer > div { display: flex; align-items: center; gap: 10px; }
+.rv-login-footer svg { flex-shrink: 0; color: #ffd400; }
+.rv-login-footer strong { font-weight: 650; color: #f8fafc; }
+.rv-login-shell button:focus-visible, .rv-login-shell a:focus-visible { outline: 2px solid #ffd400; outline-offset: 4px; }
+@media (max-width: 1360px) {
+  .rv-login-tagline { gap: 12px; padding-left: 22px; font-size: 9px; }
+  .rv-login-brand { gap: 22px; }
+  .rv-login-benefits { gap: 10px; padding-left: 0; }
+  .rv-login-benefit { gap: 8px; }
+  .rv-login-benefit + .rv-login-benefit { padding-left: 10px; }
+  .rv-login-benefit-icon { width: 40px; height: 47px; border-radius: 11px; }
+  .rv-login-benefit-icon svg { width: 25px; }
+  .rv-login-benefit p { font-size: 10px; }
+}
+@media (max-width: 1100px) { .rv-login-tagline { display: none; } .rv-login-main { grid-template-columns: minmax(0,1fr) 420px; gap: 20px; } .rv-login-benefits { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; } .rv-login-benefit + .rv-login-benefit { padding-left: 0; border: 0; } }
+@media (max-width: 980px) {
+  .rv-login-main { display: flex; flex-direction: column; gap: 24px; max-width: 720px; padding: 28px 24px 32px; }
+  .rv-login-visual { display: contents; }
+  .rv-login-copy { order: 0; align-self: stretch; max-width: none; min-height: 470px; padding-bottom: 170px; }
+  .rv-login-headline { font-size: 48px; max-width: 350px; }
+  .rv-login-headline span { display: inline; }
+  .rv-login-headline span::after { content: ' '; }
+  .rv-login-headline .rv-login-gold:nth-of-type(3)::before { content: ''; display: block; }
+  .rv-login-intro { max-width: 340px; font-size: 13px; }
+  .rv-login-scene { top: 80px; bottom: auto; width: 100%; height: 570px; }
+  .rv-login-scene img { object-position: 62% 55%; }
+  .rv-login-scene::after { background: linear-gradient(90deg,#02090dc9,transparent 80%),linear-gradient(0deg,#03090c,transparent 35%,#03090c55 85%); }
+  .rv-login-card { order: 1; width: 100%; max-width: 600px; padding: 36px; }
+  .rv-login-benefits { order: 2; width: 100%; grid-template-columns: repeat(4,minmax(0,1fr)); margin-top: 0; padding-top: 10px; }
+  .rv-login-benefit { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .rv-login-protected { font-size: 10px; }
+}
+@media (max-width: 580px) {
+  .rv-login-topbar { min-height: 76px; padding: 14px 20px; gap: 12px; }
+  .rv-login-logo svg { width: 150px; }
+  .rv-login-logo > div > div { font-size: 7px; }
+  .rv-login-protected { display: none; }
+  .rv-login-install { min-height: 36px; padding: 8px 10px; font-size: 10px; }
+  .rv-login-main { gap: 20px; padding: 24px 16px 30px; }
+  .rv-login-copy { min-height: 480px; padding: 0 6px 200px; }
+  .rv-login-official { min-height: 49px; margin-bottom: 18px; padding: 10px 13px; gap: 9px; border-radius: 12px; }
+  .rv-login-official strong { font-size: 11px; }
+  .rv-login-official span { font-size: 9px; }
+  .rv-login-headline { font-size: 43px; line-height: 1.04; max-width: 340px; }
+  .rv-login-intro { margin-top: 12px; font-size: 12px; line-height: 1.55; max-width: 315px; }
+  .rv-login-scene { top: 72px; height: 560px; }
+  .rv-login-scene img { object-position: 58% 60%; }
+  .rv-login-scene::after { background: linear-gradient(180deg,#03090c18,transparent 65%,#03090c),linear-gradient(90deg,#03090c9e,transparent); }
+  .rv-login-card { margin-top: -12px; padding: 27px 22px; border-radius: 22px; }
+  .rv-login-panel-heading { gap: 12px; margin-bottom: 22px; }
+  .rv-login-lock-mark { width: 47px; height: 55px; border-radius: 12px; }
+  .rv-login-lock-mark svg { width: 27px; }
+  .rv-login-panel-heading h2 { font-size: 19px; }
+  .rv-login-panel-heading p { font-size: 11px; }
+  .rv-login-form { gap: 22px; }
+  .rv-login-form label { font-size: 13px; }
+  .rv-login-form input[type="text"],.rv-login-form input[type="password"] { min-height: 52px; font-size: 12px; padding-left: 43px; }
+  .rv-login-input-icon { width: 17px; height: 17px; left: 14px; }
+  .rv-login-trust { gap: 12px; margin-top: 24px; padding-top: 22px; }
+  .rv-login-trust strong { font-size: 10px; }
+  .rv-login-trust p { font-size: 10px; }
+  .rv-login-benefits { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px 16px; padding: 12px 8px; }
+  .rv-login-benefit { flex-direction: row; }
+  .rv-login-benefit-icon { width: 40px; height: 47px; }
+  .rv-login-footer { padding: 20px; align-items: center; justify-content: center; text-align: center; font-size: 10px; }
+  .rv-login-footer > div { justify-content: center; }
+}
