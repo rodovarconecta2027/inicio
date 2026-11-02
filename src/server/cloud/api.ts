@@ -4,9 +4,12 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { FirestoreChatService } from './chat.js';
 import { registerCloudChatRoutes } from './chatRoutes.js';
 import type { Employee } from '../../types';
+import { CloudAuthService, firebasePasswordVerifier } from './authService.js';
+import { registerCloudAuthRoutes, cloudSessionId } from './authRoutes.js';
+import { loadCloudIdentity } from './identity.js';
 
 /** Separate migration surface. Does not replace or impersonate the local API. */
-export function createCloudApi(runtime: { auth: Auth; db: Firestore }) {
+export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: { passwordVerifier?: (email: string, password: string) => Promise<string> } = {}) {
   const { auth, db } = runtime;
   const app = express();
   app.disable('x-powered-by');
@@ -16,6 +19,12 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   });
+  const passwordVerifier = options.passwordVerifier || (process.env.FIREBASE_WEB_API_KEY ? firebasePasswordVerifier({
+    projectId: 'rodovar-conecta-hml-60770', apiKey: process.env.FIREBASE_WEB_API_KEY,
+  }) : undefined);
+  const sessions = passwordVerifier ? new CloudAuthService(runtime, passwordVerifier) : undefined;
+  if (sessions) registerCloudAuthRoutes(app, sessions);
+  else app.use('/api/cloud/auth', (_req, res) => res.status(503).json({ error: 'Autenticação de homologação ainda não configurada.', code: 'AUTH_CONFIGURATION_REQUIRED' }));
   app.get('/api/cloud/health', async (_req, res, next) => {
     try {
       const checkpoint = await db.collection('system_settings').doc('homologation_check').get();
@@ -24,27 +33,22 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }) {
     } catch (error) { next(error); }
   });
   const guard: RequestHandler = async (req: any, res, next) => {
+    if (sessions && cloudSessionId(req)) {
+      try {
+        const session = await sessions.session(cloudSessionId(req));
+        if (session.user.mustChangePassword) { res.status(403).json({ error: 'Troque sua senha antes de continuar.', code: 'PASSWORD_CHANGE_REQUIRED' }); return; }
+        if (!['GET', 'HEAD'].includes(req.method) && req.headers['x-csrf-token'] !== session.csrfToken) {
+          res.status(403).json({ error: 'Atualize a sessão antes de continuar.', code: 'CSRF_INVALID' }); return;
+        }
+        req.sessionUser = session.user; next(); return;
+      } catch (error) { next(error); return; }
+    }
     const match = /^Bearer ([^ ]+)$/.exec(String(req.headers.authorization || ''));
     if (!match) { res.status(401).json({ error: 'Entre para acessar.', code: 'AUTH_REQUIRED' }); return; }
     try {
       const token = await auth.verifyIdToken(match[1], true);
-      const snapshot = await db.collection('users').doc(token.uid).get();
-      const user = snapshot.data();
-      if (!user?.active || user.approvalStatus !== 'APROVADO') {
-        res.status(403).json({ error: 'Conta sem liberação para o portal.', code: 'ACCOUNT_NOT_APPROVED' }); return;
-      }
-      const profile = (await db.collection('employee_profiles').doc(token.uid).get()).data();
-      if (!profile) { res.status(403).json({ error: 'Perfil corporativo não provisionado.' }); return; }
-      // Explicit fields: credentials, internal authentication metadata and private
-      // records are never copied to a response. No administrator is inferred by e-mail.
-      req.sessionUser = { id: token.uid, name: profile.name, department: profile.department,
-        roleTitle: profile.roleTitle, avatar: profile.avatar || '/assets/default-avatar.png',
-        accessProfile: user.accessProfile, accessLevel: user.accessLevel,
-        permissoesPaginas: user.permissoesPaginas, active: true, approvalStatus: 'APROVADO' } as Employee;
-      if (req.sessionUser.accessLevel === 'ADMINISTRADOR') {
-        const policy = (await db.collection('system_settings').doc('security').get()).data();
-        if (policy?.protectedAdminUid !== token.uid) { res.status(403).json({ error: 'Administrador não autorizado.' }); return; }
-      }
+      req.sessionUser = (await loadCloudIdentity(runtime, token.uid)).user;
+      if (req.sessionUser.mustChangePassword) { res.status(403).json({ error: 'Troque sua senha antes de continuar.', code: 'PASSWORD_CHANGE_REQUIRED' }); return; }
       next();
     } catch (error: any) {
       if (String(error?.code || '').startsWith('auth/')) {
@@ -58,9 +62,12 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }) {
   registerCloudChatRoutes(app, guard, new FirestoreChatService(db));
   app.use((_req, res) => res.status(404).json({ error: 'Operação fora do adaptador de migração.', code: 'CLOUD_ROUTE_NOT_FOUND' }));
   app.use((error: any, _req: any, res: any, _next: any) => {
-    const status = [400, 403, 404, 409].includes(error.status) ? error.status : 503;
+    const status = [400, 401, 403, 404, 409, 429].includes(error.status) ? error.status : 503;
     if (status === 503) console.error('cloud_api_failure', { code: String(error?.code || 'UNAVAILABLE').slice(0, 80) });
-    res.status(status).json({ error: status === 503 ? 'Serviço temporariamente indisponível. Tente novamente.' : error.message });
+    res.status(status).json({ authenticated: false, error: status === 503 ? 'Serviço temporariamente indisponível. Tente novamente.' : error.message,
+      ...(error.code && status !== 503 ? { code: error.code } : {}),
+      ...(error.locked !== undefined ? { locked: error.locked, blockedUntil: error.blockedUntil, serverNow: Date.now(), remainingSeconds: error.remainingSeconds } : {}),
+    });
   });
   return app;
 }

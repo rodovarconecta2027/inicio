@@ -8,6 +8,7 @@ import { firebaseTestRuntime } from '../src/server/firebase-test/runtime';
 import { FirestoreChatService, membershipId } from '../src/server/cloud/chat';
 import { createCloudApi } from '../src/server/cloud/api';
 import { FirestoreFreightStore } from '../src/server/cloud/freightStore';
+import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
 
 test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura e revogação', async () => {
   const { auth, db } = firebaseTestRuntime();
@@ -123,4 +124,47 @@ test('Repositório Firestore: RDV transacional, reenvio, revisão e identidade p
   await assert.rejects(store.update(first.id, 2, operation('rewrite-id'), () => ({ protocol: 'RDV-999999' })), { status: 400 });
   const afterRestart = new FirestoreFreightStore(db);
   assert.equal((await afterRestart.update(first.id, 1, operation('update-one'), () => ({}))).revision, 2);
+});
+
+test('Login corporativo Firebase: sessão persistida, cinco tentativas transacionais, CSRF e suspensão', async () => {
+  const runtime = firebaseTestRuntime(), uid = 'cloud-login-test', email = uid + '@example.test';
+  const password = crypto.randomBytes(24).toString('base64url');
+  await runtime.auth.createUser({ uid, email, password });
+  await runtime.db.collection('users').doc(uid).set({ active: true, approvalStatus: 'APROVADO', accessProfile: 'MONITORAMENTO', accessLevel: 'FUNCIONARIO' });
+  await runtime.db.collection('employee_profiles').doc(uid).set({ name: 'Funcionário Fictício', login: 'worker.test', department: 'Logística', roleTitle: 'Monitoramento' });
+  for (const identifier of ['worker.test', email]) await runtime.db.collection('auth_identifiers').doc(privateIdentifierKey(identifier)).set({ uid, email });
+  const verifier = firebasePasswordVerifier({ projectId: 'demo-rodovar-conecta', apiKey: 'emulator-only', emulator: true });
+  const service = new CloudAuthService(runtime, verifier);
+  const login = await service.login({ identifier: 'worker.test', password });
+  assert.equal(login.user.id, uid);
+  const saved = await runtime.db.collection('auth_sessions').get();
+  assert.ok(saved.docs.some(doc => doc.data().uid === uid && doc.id !== login.sessionId));
+  const restarted = new CloudAuthService(runtime, verifier);
+  assert.equal((await restarted.session(login.sessionId)).user.id, uid);
+  await assert.rejects(restarted.logout(login.sessionId, 'wrong-token'), { status: 403 });
+  await restarted.logout(login.sessionId, login.csrfToken);
+  await assert.rejects(restarted.session(login.sessionId), { status: 401 });
+
+  const server = createCloudApi(runtime, { passwordVerifier: verifier }).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as any).port}/api/cloud/auth`;
+  try {
+    const response = await fetch(base + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'worker.test', password }) });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('set-cookie') || '', /HttpOnly/i);
+    const httpLogin = await response.json();
+    assert.equal((await fetch(base + '/session', { headers: { 'X-Rodovar-Session': httpLogin.sessionId } })).status, 200);
+    assert.equal((await fetch(base + '/register', { method: 'POST' })).status, 403);
+    await runtime.db.collection('users').doc(uid).update({ active: false });
+    assert.equal((await fetch(base + '/session', { headers: { 'X-Rodovar-Session': httpLogin.sessionId } })).status, 403);
+    await runtime.db.collection('users').doc(uid).update({ active: true });
+    assert.equal((await fetch(base + '/session', { headers: { 'X-Rodovar-Session': httpLogin.sessionId } })).status, 401);
+    const failures = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => service.login({ identifier: i % 2 ? email : 'worker.test', password: 'invalid-password' })));
+    assert.equal(failures.filter(result => result.status === 'rejected' && result.reason.status === 429).length, 1);
+    assert.equal((await service.lockStatus('worker.test')).locked, true);
+    assert.equal((await service.lockStatus(email)).locked, true);
+    await assert.rejects(service.login({ identifier: email, password }), { status: 429 });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });
