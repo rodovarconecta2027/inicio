@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    { "collectionGroup": "conversation_members", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "active", "order": "ASCENDING" }
+    ] },
+    { "collectionGroup": "messages", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "conversationId", "order": "ASCENDING" }, { "fieldPath": "sequence", "order": "DESCENDING" }
+    ] }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "messages", "fieldPath": "text", "indexes": [] }
+  ]
+}

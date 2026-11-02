@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/cloud/:path*",
+      "destination": "/api/cloud?cloudPath=:path*"
+    },
+    {
       "source": "/((?!manifest\\.json|sw\\.js|apple-touch-icon\\.png|pwa-.*\\.png|icon\\.svg|icons/|assets/|uploads/|api/).*)",
       "destination": "/index.html"
     }

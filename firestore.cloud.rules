@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function active() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approvalStatus == 'APROVADO';
+    }
+    function member(conversationId) {
+      let key = conversationId + '__' + request.auth.uid;
+      return communication() && exists(/databases/$(database)/documents/conversation_members/$(key))
+        && get(/databases/$(database)/documents/conversation_members/$(key)).data.active == true;
+    }
+    function communication() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return active() && (user.accessProfile in ['DIRETORIA', 'MONITORAMENTO']
+        || (user.accessLevel == 'ADMINISTRADOR'
+          && get(/databases/$(database)/documents/system_settings/security).data.protectedAdminUid == request.auth.uid));
+    }
+    match /users/{uid} { allow read: if active() && request.auth.uid == uid; allow write: if false; }
+    match /conversations/{id} { allow read: if member(id); allow write: if false; }
+    match /conversation_members/{id} {
+      allow read: if communication() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+    match /messages/{id} { allow read: if member(resource.data.conversationId); allow write: if false; }
+    match /groups/{id} { allow read: if member(resource.data.conversationId); allow write: if false; }
+    match /group_members/{id} { allow read: if member(resource.data.conversationId); allow write: if false; }
+    match /message_reads/{id} { allow read: if member(resource.data.conversationId); allow write: if false; }
+    match /chat_preferences/{uid} { allow read: if active() && request.auth.uid == uid; allow write: if false; }
+    // Operational collections remain server-only while their migration is tested.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -12,6 +12,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'node:url';
 import zlib from 'zlib';
 import { createServer as createViteServer } from 'vite';
 
@@ -983,7 +984,7 @@ function saveDatabase(db: ServerDatabase): void {
   fs.renameSync(tmpFile, DB_FILE_PATH);
 }
 
-let dbState: ServerDatabase = loadOrInitDatabase();
+let dbState: ServerDatabase;
 
 function resolveUserAvatarUrl(user: ServerUserRecord, config: SystemConfig): string {
   const rev = config.revision || 1;
@@ -1239,11 +1240,20 @@ function requireAdminSession(
 // ============================================================================
 // 6. EXPRESS APPLICATION & API ROUTES
 // ============================================================================
-async function startServer() {
+export async function createPortalApp(options: { serveFrontend?: boolean } = {}) {
+  if (process.env.VERCEL) {
+    throw new Error('A API atual requer persistência durável. A migração dos arquivos locais deve ser concluída antes de executar este servidor na Vercel.');
+  }
+  dbState = loadOrInitDatabase();
   ensureDefaultAvatarPngExists();
   ensurePwaIconsExist();
 
   const app = express();
+  app.disable('x-powered-by');
+  app.get('/api/health', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ status: 'ok', authentication: 'local-session', persistence: 'local-files' });
+  });
   app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/auth') || req.path.startsWith('/profile')) return next();
     requireApprovedSession(req, res, () => {
@@ -2990,6 +3000,7 @@ async function startServer() {
   });
 
   // Mount Vite middleware in development or static dist in production
+  if (options.serveFrontend === false) return app;
   const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(path.join(ROOT_DIR, 'dist'));
   if (isProd) {
     const distPath = path.join(ROOT_DIR, 'dist');
@@ -3005,13 +3016,20 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
+  return app;
+}
+
+export async function startServer() {
+  const app = await createPortalApp();
   const host = process.env.HOST || '127.0.0.1';
-  app.listen(PORT, host, () => {
+  return app.listen(PORT, host, () => {
     console.log(`RODOVAR CONECTA Server running on http://${host}:${PORT}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start RODOVAR server:', err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  startServer().catch((err) => {
+    console.error('Failed to start RODOVAR server:', err);
+    process.exitCode = 1;
+  });
+}
