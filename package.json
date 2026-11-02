@@ -6,6 +6,7 @@
   "engines": { "node": "24.x" },
   "overrides": {
     "@vercel/cli-config": { "zod": "4.6.7" },
+    "jwks-rsa": { "jose": "^5.10.0" },
     "@grpc/grpc-js": "^1.13.6"
   },
   "scripts": {

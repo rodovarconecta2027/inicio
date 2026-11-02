@@ -22,5 +22,6 @@ jobs:
           java-version: 21
       - run: npm ci
       - run: npm run lint
+      - run: node --no-experimental-require-module -e "require('firebase-admin/auth')"
       - run: npm run firebase:test
       - run: npm run cloud:test
