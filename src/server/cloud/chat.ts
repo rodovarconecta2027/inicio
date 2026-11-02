@@ -12,6 +12,28 @@ export const membershipId = (conversationId: string, uid: string) =>
 export class FirestoreChatService {
   constructor(private readonly db: Firestore) {}
 
+  async list(uid: string) {
+    return this.db.runTransaction(async tx => {
+      this.communication(await this.authorized(tx, uid));
+      const memberships = await tx.get(this.db.collection('conversation_members').where('userId', '==', uid).limit(100));
+      const active = memberships.docs.filter(doc => doc.data().active);
+      const conversations = await Promise.all(active.map(doc => tx.get(this.db.collection('conversations').doc(doc.data().conversationId))));
+      return conversations.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a: any, b: any) => String(b.updatedAtIso).localeCompare(String(a.updatedAtIso)));
+    });
+  }
+
+  async messages(uid: string, conversationId: string, before?: number) {
+    if (before !== undefined && (!Number.isSafeInteger(before) || before < 1)) fail('Cursor inválido.');
+    return this.db.runTransaction(async tx => {
+      await this.member(tx, uid, conversationId);
+      let query = this.db.collection('messages').where('conversationId', '==', conversationId).orderBy('sequence', 'desc').limit(40);
+      if (before !== undefined) query = query.startAfter(before);
+      const result = await tx.get(query);
+      return result.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    });
+  }
+
   private async authorized(tx: Transaction, uid: string) {
     if (!identifier(uid)) fail('Sessão inválida.', 401);
     const user = (await tx.get(this.db.collection('users').doc(uid))).data();

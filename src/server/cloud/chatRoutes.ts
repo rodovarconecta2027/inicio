@@ -7,6 +7,9 @@ export function registerCloudChatRoutes(app: Express, guard: RequestHandler, ser
     if (!req.sessionUser?.id) { res.status(401).json({ error: 'Entre para acessar.' }); return; }
     try { res.json(await action(req)); } catch (error) { next(error); }
   };
+  app.get('/api/cloud/chat/conversations', guard, route(req => service.list(req.sessionUser.id)));
+  app.get('/api/cloud/chat/conversations/:id/messages', guard, route(req =>
+    service.messages(req.sessionUser.id, req.params.id, req.query.before === undefined ? undefined : Number(req.query.before))));
   app.post('/api/cloud/chat/conversations', guard, route(req => service.create(req.sessionUser.id, {
     participants: req.body?.participants, name: req.body?.name, isGroup: req.body?.isGroup,
     key: String(req.headers['x-idempotency-key'] || ''),
