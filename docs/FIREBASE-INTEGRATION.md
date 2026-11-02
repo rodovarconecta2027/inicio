@@ -1,5 +1,7 @@
 # Firebase: preparação isolada e sem publicação
 
+> Registro da etapa original com emuladores. Em 02/11/2026 foi criada a homologação remota e iniciada a migração progressiva. Consulte `CLOUD-HOMOLOGATION.md` e `MIGRATION-MAP.md` para o estado posterior. A infraestrutura remota não significa que os módulos operacionais já foram migrados.
+
 ## Estrutura encontrada
 - Interface React/Vite: App.tsx, LoginScreen.tsx e serverApi.ts; preservada.
 - Autenticação operacional existente: Express, scrypt, cookie/sessão, CSRF e allowlist em server.ts.
