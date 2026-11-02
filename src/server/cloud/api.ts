@@ -1,8 +1,8 @@
 import express, { type RequestHandler } from 'express';
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
-import { FirestoreChatService } from './chat';
-import { registerCloudChatRoutes } from './chatRoutes';
+import { FirestoreChatService } from './chat.js';
+import { registerCloudChatRoutes } from './chatRoutes.js';
 import type { Employee } from '../../types';
 
 /** Separate migration surface. Does not replace or impersonate the local API. */

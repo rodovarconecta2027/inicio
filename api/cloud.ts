@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { createCloudApi } from '../src/server/cloud/api';
-import { cloudRuntime } from '../src/server/cloud/runtime';
+import { createCloudApi } from '../src/server/cloud/api.js';
+import { cloudRuntime } from '../src/server/cloud/runtime.js';
 
 let handler: ReturnType<typeof createCloudApi>;
 export default function cloudApi(req: Request, res: Response) {

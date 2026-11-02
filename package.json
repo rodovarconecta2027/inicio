@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": { "node": "24.x" },
+  "overrides": {
+    "@vercel/cli-config": { "zod": "4.6.7" },
+    "@grpc/grpc-js": "^1.13.6"
+  },
   "scripts": {
     "dev": "node node_modules/tsx/dist/cli.mjs server.ts",
     "start": "node --import tsx scripts/start-lan.mjs",

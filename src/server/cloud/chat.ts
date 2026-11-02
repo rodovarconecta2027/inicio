@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
-import { hasPagePermission } from '../../lib/permissions';
+import { hasPagePermission } from '../../lib/permissions.js';
 import type { Employee } from '../../types';
 
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };

@@ -1,4 +1,4 @@
-import { PROFILE_MODULES } from './accessPolicy';
+import { PROFILE_MODULES } from './accessPolicy.js';
 import { Department, Employee, UserRole } from '../types';
 
 export interface ModulePermissionOption {
