@@ -29,7 +29,13 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     try {
       const checkpoint = await db.collection('system_settings').doc('homologation_check').get();
       if (!checkpoint.exists) { res.status(503).json({ error: 'Persistência de homologação não validada.' }); return; }
-      res.json({ status: 'ok', environment: 'homologation', persistence: 'firestore', migration: 'partial' });
+      // Firestore connectivity alone does not establish that portal login is ready.
+      res.status(sessions ? 200 : 503).json({
+        status: sessions ? 'ok' : 'configuration_required', environment: 'homologation',
+        persistence: 'firestore', migration: 'partial',
+        authentication: sessions ? 'configured' : 'not_configured',
+        portalIntegration: 'auth_only',
+      });
     } catch (error) { next(error); }
   });
   const guard: RequestHandler = async (req: any, res, next) => {

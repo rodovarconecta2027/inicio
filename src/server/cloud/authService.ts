@@ -113,6 +113,29 @@ export class CloudAuthService {
     batch.create(this.runtime.db.collection('audit_logs').doc(), { actorId: current.user.id, action: 'AUTH_LOGOUT', atIso: new Date().toISOString() });
     await batch.commit();
   }
+
+  async firstPassword(sessionId: string, csrf: string, password: string) {
+    const current = await this.session(sessionId);
+    if (csrf !== current.csrfToken) throw error('Atualize a sessão.', 403, 'CSRF_INVALID');
+    const ref = this.runtime.db.collection('auth_sessions').doc(digest(sessionId));
+    const saved = (await ref.get()).data();
+    if (!current.user.mustChangePassword || !saved || saved.authTime * 1000 < Date.now() - 300000)
+      throw error('Entre novamente para definir a senha de primeiro acesso.', 403, 'REAUTH_REQUIRED');
+    if (typeof password !== 'string' || password.length < 12 || password.length > 128)
+      throw error('Use uma senha pessoal com 12 a 128 caracteres.', 400, 'INVALID_PASSWORD');
+    let same = false;
+    try { await this.verifyPassword(current.user.email, password); same = true; }
+    catch (cause: any) { if (cause.status !== 401) throw cause; }
+    if (same) throw error('A nova senha deve ser diferente da inicial.', 400, 'PASSWORD_UNCHANGED');
+    // Invalidate corporate sessions before changing the Firebase credential.
+    const sessions = await this.runtime.db.collection('auth_sessions').where('uid', '==', current.user.id).get();
+    for (const doc of sessions.docs) await doc.ref.delete();
+    await this.runtime.auth.updateUser(current.user.id, { password });
+    await this.runtime.auth.revokeRefreshTokens(current.user.id);
+    await this.runtime.db.collection('users').doc(current.user.id).update({ mustChangePassword: false });
+    await this.runtime.db.collection('audit_logs').add({ actorId: current.user.id, action: 'FIRST_PASSWORD_CHANGED', atIso: new Date().toISOString() });
+    return this.login({ identifier: current.user.email, password });
+  }
 }
 
 /** No arbitrary authentication URL is accepted from a request. */

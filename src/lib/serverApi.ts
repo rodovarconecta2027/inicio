@@ -17,6 +17,10 @@ import {
   UserRole,
 } from '../types';
 
+const cloudAuth = (import.meta as any).env?.VITE_CLOUD_AUTH === 'true';
+const authUrl = (path: string) => cloudAuth ? path.replace('/api/auth/', '/api/cloud/auth/') : path;
+const tokenStorageKey = cloudAuth ? 'rodovar_cloud_security_tokens_v1' : 'rodovar_security_tokens_v2';
+
 export const DEFAULT_NEUTRAL_AVATAR_URL = '/assets/default-avatar.png';
 
 let currentCsrfToken: string | null = null;
@@ -28,11 +32,11 @@ export function setAuthTokens(csrfToken: string | null, sessionId: string | null
   try {
     if (csrfToken && sessionId) {
       const serialized = JSON.stringify({ csrfToken, sessionId });
-      sessionStorage.setItem('rodovar_security_tokens_v2', serialized);
-      localStorage.setItem('rodovar_security_tokens_v2', serialized);
+      sessionStorage.setItem(tokenStorageKey, serialized);
+      localStorage.setItem(tokenStorageKey, serialized);
     } else {
-      sessionStorage.removeItem('rodovar_security_tokens_v2');
-      localStorage.removeItem('rodovar_security_tokens_v2');
+      sessionStorage.removeItem(tokenStorageKey);
+      localStorage.removeItem(tokenStorageKey);
     }
   } catch {
     // ignore storage errors
@@ -45,8 +49,8 @@ export function loadStoredAuthTokens(): { csrfToken: string | null; sessionId: s
   }
   try {
     const raw =
-      sessionStorage.getItem('rodovar_security_tokens_v2') ||
-      localStorage.getItem('rodovar_security_tokens_v2');
+      sessionStorage.getItem(tokenStorageKey) ||
+      localStorage.getItem(tokenStorageKey);
     if (raw) {
       const parsed = JSON.parse(raw);
       currentCsrfToken = parsed.csrfToken || null;
@@ -100,7 +104,7 @@ export async function apiFetchSession(): Promise<{
   const headers: Record<string, string> = {};
   if (sessionId) headers['X-Rodovar-Session'] = sessionId;
 
-  const res = await fetch('/api/auth/session', {
+  const res = await fetch(authUrl('/api/auth/session'), {
     method: 'GET',
     credentials: 'include',
     headers,
@@ -122,7 +126,7 @@ export async function apiCheckLockStatus(identifier: string): Promise<{
   message?: string;
 }> {
   const res = await fetch(
-    `/api/auth/lock-status?identifier=${encodeURIComponent(identifier.trim())}`,
+    authUrl(`/api/auth/lock-status?identifier=${encodeURIComponent(identifier.trim())}`),
     {
       method: 'GET',
       credentials: 'include',
@@ -151,7 +155,7 @@ export async function apiLogin(
   remainingAttempts?: number;
   approvalStatus?: AccountApprovalStatus;
 }> {
-  const res = await fetch('/api/auth/login', {
+  const res = await fetch(authUrl('/api/auth/login'), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -179,7 +183,7 @@ export async function apiRequestAccess(payload: {
   message?: string;
   error?: string;
 }> {
-  const res = await fetch('/api/auth/request-access', {
+  const res = await fetch(authUrl('/api/auth/request-access'), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -196,7 +200,7 @@ export async function apiRequestAccess(payload: {
 
 export async function apiLogout(): Promise<void> {
   try {
-    await fetch('/api/auth/logout', {
+    await fetch(authUrl('/api/auth/logout'), {
       method: 'POST',
       credentials: 'include',
       headers: getAuthHeaders(),
@@ -212,7 +216,7 @@ export async function apiRequestPasswordReset(identifier: string): Promise<{
   resetToken?: string;
   error?: string;
 }> {
-  const res = await fetch('/api/auth/request-password-reset', {
+  const res = await fetch(authUrl('/api/auth/request-password-reset'), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -235,7 +239,7 @@ export async function apiResetPasswordWithToken(
   message?: string;
   error?: string;
 }> {
-  const res = await fetch('/api/auth/reset-password', {
+  const res = await fetch(authUrl('/api/auth/reset-password'), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -357,13 +361,14 @@ export async function apiUpdateProfile(payload: {
   user?: Employee;
   error?: string;
 }> {
-  const res = await fetch('/api/profile', {
+  const res = await fetch(cloudAuth ? '/api/cloud/profile' : '/api/profile', {
     method: 'PUT',
     credentials: 'include',
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   const data = await res.json();
+  if (res.ok && data.sessionId && data.csrfToken) setAuthTokens(data.csrfToken, data.sessionId);
   return {
     ok: Boolean(res.ok && data.ok),
     user: data.user,

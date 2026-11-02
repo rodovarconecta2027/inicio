@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    define: { 'import.meta.env.VITE_CLOUD_AUTH': JSON.stringify(process.env.VERCEL_ENV === 'preview' && process.env.RODOVAR_CLOUD_ENV === 'homologation' && process.env.GOOGLE_CLOUD_PROJECT === 'rodovar-conecta-hml-60770' ? 'true' : 'false') },
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

@@ -8,6 +8,17 @@ export function cloudSessionId(req: Request): string {
 }
 
 export function registerCloudAuthRoutes(app: Express, service: CloudAuthService) {
+  app.put('/api/cloud/profile', async (req, res, next) => {
+    try {
+      if (Object.keys(req.body || {}).some(key => key !== 'password')) {
+        res.status(400).json({ error: 'Esta operação permite apenas definir a senha de primeiro acesso.' }); return;
+      }
+      const result = await service.firstPassword(cloudSessionId(req), String(req.headers['x-csrf-token'] || ''), req.body?.password);
+      res.cookie('rodovar_cloud_sid', result.sessionId, { httpOnly: true, secure: Boolean(process.env.VERCEL) || req.secure,
+        sameSite: 'lax', path: '/api/cloud', maxAge: result.expiresAt - Date.now() });
+      res.json(result);
+    } catch (error) { next(error); }
+  });
   app.all(['/api/cloud/auth/register', '/api/cloud/auth/signup', '/api/cloud/auth/request-access'], (_req, res) => {
     res.status(403).json({ error: 'Cadastro público desabilitado. Procure o administrador.', code: 'PUBLIC_REGISTRATION_DISABLED' });
   });

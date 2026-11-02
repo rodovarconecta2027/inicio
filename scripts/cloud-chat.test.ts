@@ -9,6 +9,26 @@ import { FirestoreChatService, membershipId } from '../src/server/cloud/chat';
 import { createCloudApi } from '../src/server/cloud/api';
 import { FirestoreFreightStore } from '../src/server/cloud/freightStore';
 import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
+import { bootstrapAdmin } from '../src/server/cloud/bootstrapAdmin';
+
+test('Administrador: provisionamento único, primeiro acesso e revogação', async () => {
+  const runtime = firebaseTestRuntime(), uid = 'bootstrap-test';
+  const password = crypto.randomBytes(24).toString('base64url');
+  await runtime.auth.createUser({ uid, email: uid + '@example.test', password });
+  const input = { projectId: 'demo-rodovar-conecta', uid, login: 'admin.test', name: 'Administrador Teste', confirm: `PROVISION:demo-rodovar-conecta:${uid}` };
+  await assert.rejects(bootstrapAdmin(runtime, { ...input, projectId: 'production' }));
+  const results = await Promise.allSettled([bootstrapAdmin(runtime, input), bootstrapAdmin(runtime, input)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  const service = new CloudAuthService(runtime, firebasePasswordVerifier({ projectId: input.projectId, apiKey: 'emulator-only', emulator: true }));
+  const session = await service.login({ identifier: input.login, password });
+  assert.equal(session.user.mustChangePassword, true);
+  await assert.rejects(service.firstPassword(session.sessionId, 'bad', password), { status: 403 });
+  await assert.rejects(service.firstPassword(session.sessionId, session.csrfToken, password), { status: 400 });
+  const changed = await service.firstPassword(session.sessionId, session.csrfToken, crypto.randomBytes(24).toString('base64url'));
+  assert.equal(changed.user.mustChangePassword, false);
+  await assert.rejects(service.session(session.sessionId), { status: 401 });
+  assert.equal((await new CloudAuthService(runtime, async () => { throw Error(); }).session(changed.sessionId)).user.id, uid);
+});
 
 test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura e revogação', async () => {
   const { auth, db } = firebaseTestRuntime();
@@ -77,6 +97,10 @@ test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura
     assert.equal((await reloaded.create(ids[0], input)).id, conversation.id);
     const listed = await getDocs(query(collection(stores[1], 'messages'), where('conversationId', '==', conversation.id), orderBy('sequence', 'desc'), limit(40)));
     assert.equal(listed.size, 3);
+    assert.equal((await service.list(ids[0])).length, 1);
+    assert.equal((await service.messages(ids[1], conversation.id)).length, 3);
+    assert.equal((await service.messages(ids[1], conversation.id, 2)).length, 1);
+    await assert.rejects(service.messages(ids[2], conversation.id), { status: 403 });
     await service.updateMessage(ids[0], first.id, null);
     assert.equal((await getDoc(doc(stores[1], 'messages', first.id))).data()!.deleted, true);
 
