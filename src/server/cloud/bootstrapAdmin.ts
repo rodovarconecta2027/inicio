@@ -12,8 +12,8 @@ export async function bootstrapAdmin(runtime: { auth: Auth; db: Firestore }, inp
   if (!/^[A-Za-z0-9._-]{3,80}$/.test(input.login) || !input.name?.trim() || input.name.length > 120)
     throw Error('Nome e login válidos são obrigatórios.');
   const account = await runtime.auth.getUser(input.uid);
-  if (!account.email || account.disabled || !account.email.endsWith('@example.test'))
-    throw Error('Use uma conta de teste ativa, previamente criada, com e-mail @example.test.');
+  if (!account.email || account.disabled)
+    throw Error('Use a conta de homologação ativa, previamente criada e explicitamente identificada pelo UID.');
   const db = runtime.db, security = db.collection('system_settings').doc('security');
   const user = db.collection('users').doc(account.uid), profile = db.collection('employee_profiles').doc(account.uid);
   const aliases = [...new Set([privateIdentifierKey(input.login), privateIdentifierKey(account.email)])].map(id => db.collection('auth_identifiers').doc(id));

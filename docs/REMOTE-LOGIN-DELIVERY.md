@@ -11,7 +11,7 @@ recente e CSRF, altera a senha no Firebase e invalida sessões anteriores.
 
 Não existe endpoint de bootstrap, cadastro público ou criação automática de usuários.
 Um operador deve criar explicitamente no Authentication de homologação uma identidade de teste
-ativa com e-mail @example.test e senha inicial individual, sem dados reais. Anote somente o UID.
+ativa, explicitamente autorizada pelo UID, com senha inicial individual. Não importe cadastros reais.
 Em terminal com ADC autorizado para homologação, configure RODOVAR_CLOUD_ENV=homologation e
 GOOGLE_CLOUD_PROJECT=rodovar-conecta-hml-60770 e execute:
 
@@ -20,10 +20,12 @@ node --import tsx scripts/bootstrap-cloud-admin.ts UID admin.hml "Administrador 
 ```
 
 Não passe senha/chave privada na linha de comando. A autorização do Firebase CLI não equivale
-a ADC. O comando recusa outro projeto, conta real, identidade já vinculada ou política de
+a ADC. O comando recusa outro projeto, conta desabilitada, identidade já vinculada ou política de
 segurança já existente. Uma transação cria perfil, vínculos privados, política de administrador
 protegido e auditoria; tentativas concorrentes não criam dois administradores.
-Não foi executado remotamente: nenhuma identidade de teste foi escolhida/criada pelo usuário.
+Executado em homologação após autorização explícita do usuário para o UID informado. Login: admin.hml. Vínculos, aprovação e troca obrigatória conferidos por leitura remota. Nenhuma conta Firebase foi criada e a senha existente não foi alterada.
+
+O argumento opcional --firebase-cli reutiliza a autorização local do operador apenas durante o provisionamento, em memória; não exporta tokens ao aplicativo. O runtime da Vercel permanece com OIDC.
 
 ## Limites desta entrega
 
