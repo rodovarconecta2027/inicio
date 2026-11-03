@@ -1,5 +1,6 @@
-import {financialProjection} from './financialProjection';
-import {subscribeUnifiedFinance,unifiedFinanceFreights} from './unifiedFreightEngine';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import {financialProjection} from './financialProjection.js';
+import {subscribeUnifiedFinance,unifiedFinanceFreights} from './unifiedFreightEngine.js';
 import { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -17,12 +18,12 @@ import {
   PaymentVerificationStatus,
   UserRole,
 } from '../types';
-import { INITIAL_FREIGHTS, formatFileSize } from '../lib/freightDatabase';
+import { INITIAL_FREIGHTS, formatFileSize } from '../lib/freightDatabase.js';
 import {
   canAccessFinanceiroFreights,
   canConfirmFreightPayment,
-} from '../lib/permissions';
-import { formatSaoPauloDateTime } from './unifiedFreightEngine';
+} from '../lib/permissions.js';
+import { formatSaoPauloDateTime } from './unifiedFreightEngine.js';
 
 const ROOT_DIR = (process.env.RODOVAR_DATA_ROOT || process.cwd());
 const PAYMENT_STORE_DIR = path.join(ROOT_DIR, 'data', 'payment-store');
@@ -52,7 +53,7 @@ export interface StagedShareTargetRecord {
   errorMessage?: string;
 }
 
-interface PaymentStoreState {
+export interface PaymentStoreState {
   freights: FreightRecord[];
   intents: PaymentIntentRecord[];
   receipts: PaymentReceiptRecord[];
@@ -68,6 +69,9 @@ const paymentStoreState: PaymentStoreState = {
   stagedShares: [],
 };
 
+const remotePayments = new AsyncLocalStorage<PaymentStoreState>();
+const currentPaymentState = () => remotePayments.getStore() || paymentStoreState;
+export const withPaymentStore = <T>(state: PaymentStoreState, action: () => T): T => remotePayments.run(state, action);
 function ensureDirectories(): void {
   if (!fs.existsSync(PAYMENT_STORE_DIR)) {
     fs.mkdirSync(PAYMENT_STORE_DIR, { recursive: true });
@@ -213,17 +217,18 @@ export function validatePaymentReceiptBinary(
 }
 
 function savePaymentStore(): void {
+  if (remotePayments.getStore()) return;
   ensureDirectories();
-  fs.writeFileSync(FREIGHTS_FILE, JSON.stringify(paymentStoreState.freights, null, 2), 'utf8');
-  fs.writeFileSync(INTENTS_FILE, JSON.stringify(paymentStoreState.intents, null, 2), 'utf8');
-  fs.writeFileSync(RECEIPTS_FILE, JSON.stringify(paymentStoreState.receipts, null, 2), 'utf8');
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(paymentStoreState.history, null, 2), 'utf8');
-  fs.writeFileSync(STAGED_SHARES_FILE, JSON.stringify(paymentStoreState.stagedShares, null, 2), 'utf8');
+  fs.writeFileSync(FREIGHTS_FILE, JSON.stringify(currentPaymentState().freights, null, 2), 'utf8');
+  fs.writeFileSync(INTENTS_FILE, JSON.stringify(currentPaymentState().intents, null, 2), 'utf8');
+  fs.writeFileSync(RECEIPTS_FILE, JSON.stringify(currentPaymentState().receipts, null, 2), 'utf8');
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(currentPaymentState().history, null, 2), 'utf8');
+  fs.writeFileSync(STAGED_SHARES_FILE, JSON.stringify(currentPaymentState().stagedShares, null, 2), 'utf8');
 }
 
 function enrichFreightWithReceipts(freight: FreightRecord): FreightRecord {
-  const freightReceipts = paymentStoreState.receipts.filter((r) => r.freightId === freight.id);
-  const freightHistory = paymentStoreState.history.filter((h) => h.freightId === freight.id);
+  const freightReceipts = currentPaymentState().receipts.filter((r) => r.freightId === freight.id);
+  const freightHistory = currentPaymentState().history.filter((h) => h.freightId === freight.id);
 
   // Latest active receipt for each installment
   const latestAdiantamento = freightReceipts.find((r) => r.installmentType === 'ADIANTAMENTO');
@@ -301,48 +306,48 @@ function loadOrSeedPaymentStore(): void {
   if (fs.existsSync(INTENTS_FILE)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(INTENTS_FILE, 'utf8'));
-      if (Array.isArray(parsed)) paymentStoreState.intents = parsed;
+      if (Array.isArray(parsed)) currentPaymentState().intents = parsed;
     } catch {
-      paymentStoreState.intents = [];
+      currentPaymentState().intents = [];
     }
   }
 
   if (fs.existsSync(RECEIPTS_FILE)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(RECEIPTS_FILE, 'utf8'));
-      if (Array.isArray(parsed)) paymentStoreState.receipts = parsed;
+      if (Array.isArray(parsed)) currentPaymentState().receipts = parsed;
     } catch {
-      paymentStoreState.receipts = [];
+      currentPaymentState().receipts = [];
     }
   }
 
   if (fs.existsSync(HISTORY_FILE)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-      if (Array.isArray(parsed)) paymentStoreState.history = parsed;
+      if (Array.isArray(parsed)) currentPaymentState().history = parsed;
     } catch {
-      paymentStoreState.history = [];
+      currentPaymentState().history = [];
     }
   }
 
   if (fs.existsSync(STAGED_SHARES_FILE)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(STAGED_SHARES_FILE, 'utf8'));
-      if (Array.isArray(parsed)) paymentStoreState.stagedShares = parsed;
+      if (Array.isArray(parsed)) currentPaymentState().stagedShares = parsed;
     } catch {
-      paymentStoreState.stagedShares = [];
+      currentPaymentState().stagedShares = [];
     }
   }
 
   if (!loadedFreights) {
-    paymentStoreState.freights = INITIAL_FREIGHTS.map((f) => ({
+    currentPaymentState().freights = INITIAL_FREIGHTS.map((f) => ({
       ...f,
       adiantamentoVerificacaoStatus: f.adiantamentoPago ? 'PAGAMENTO_CONFIRMADO' : 'SEM_COMPROVANTE',
       saldoVerificacaoStatus: f.saldoPago ? 'PAGAMENTO_CONFIRMADO' : 'SEM_COMPROVANTE',
     }));
 
     // Seed initial confirmed receipt binaries on disk so existing freights (#0841, #0840, #0839) have real downloadable files
-    for (const f of paymentStoreState.freights) {
+    for (const f of currentPaymentState().freights) {
       if (f.docs.comprovanteAdiantamento) {
         const doc = f.docs.comprovanteAdiantamento;
         const storageFileName = `seed-${f.id}-adiantamento.pdf`;
@@ -388,8 +393,8 @@ function loadOrSeedPaymentStore(): void {
           serverCreatedAtFormatted: doc.uploadedAt,
           downloadUrl: `/api/pagamentos/comprovantes/${doc.id}/download`,
         };
-        if (!paymentStoreState.receipts.some((r) => r.id === receiptRecord.id)) {
-          paymentStoreState.receipts.push(receiptRecord);
+        if (!currentPaymentState().receipts.some((r) => r.id === receiptRecord.id)) {
+          currentPaymentState().receipts.push(receiptRecord);
         }
       }
 
@@ -438,8 +443,8 @@ function loadOrSeedPaymentStore(): void {
           serverCreatedAtFormatted: doc.uploadedAt,
           downloadUrl: `/api/pagamentos/comprovantes/${doc.id}/download`,
         };
-        if (!paymentStoreState.receipts.some((r) => r.id === receiptRecord.id)) {
-          paymentStoreState.receipts.push(receiptRecord);
+        if (!currentPaymentState().receipts.some((r) => r.id === receiptRecord.id)) {
+          currentPaymentState().receipts.push(receiptRecord);
         }
       }
     }
@@ -447,7 +452,7 @@ function loadOrSeedPaymentStore(): void {
     savePaymentStore();
   } else {
     // Fix frete-0841 rule consistency if loaded from older store
-    paymentStoreState.freights = loadedFreights.map((f) => {
+    currentPaymentState().freights = loadedFreights.map((f) => {
       if (f.id === 'frete-0841' && f.regraTipo === 'INTEGRAL_100' && f.percentualSaldo === 30) {
         return {
           ...f,
@@ -493,14 +498,14 @@ function appendPaymentAuditHistory(params: {
     previousReceiptId: params.previousReceiptId,
     amountBRL: params.amountBRL,
   };
-  paymentStoreState.history.unshift(entry);
+  currentPaymentState().history.unshift(entry);
   return entry;
 }
 
 function sweepExpiredIntents(): boolean {
   const nowMs = Date.now();
   let mutated = false;
-  for (const intent of paymentStoreState.intents) {
+  for (const intent of currentPaymentState().intents) {
     if (intent.status === 'AGUARDANDO_COMPROVANTE') {
       const expMs = Date.parse(intent.expiresAtIso);
       if (!Number.isNaN(expMs) && nowMs >= expMs) {
@@ -626,19 +631,20 @@ export function registerPaymentReceiptRoutes(
     action: string,
     details: string,
     ip?: string
-  ) => void
+  ) => void,
+  options: { remote?: boolean } = {}
 ): void {
-  loadOrSeedPaymentStore();
+  if (!options.remote) loadOrSeedPaymentStore();
   const syncUnified=(freight:any)=>{
-    const index=paymentStoreState.freights.findIndex(f=>f.id===freight.id);
-    const projected=financialProjection(freight,index<0?undefined:paymentStoreState.freights[index]);
+    const index=currentPaymentState().freights.findIndex(f=>f.id===freight.id);
+    const projected=financialProjection(freight,index<0?undefined:currentPaymentState().freights[index]);
     if(!projected)return;
-    if(index>=0&&JSON.stringify(projected)===JSON.stringify(paymentStoreState.freights[index]))return;
-    if(index<0)paymentStoreState.freights.push(projected);else paymentStoreState.freights[index]=projected;
+    if(index>=0&&JSON.stringify(projected)===JSON.stringify(currentPaymentState().freights[index]))return;
+    if(index<0)currentPaymentState().freights.push(projected);else currentPaymentState().freights[index]=projected;
     savePaymentStore();
   };
-  unifiedFinanceFreights().forEach(syncUnified);
-  subscribeUnifiedFinance(syncUnified);
+  if (!options.remote) unifiedFinanceFreights().forEach(syncUnified);
+  if (!options.remote) subscribeUnifiedFinance(syncUnified);
 
   function requireFinanceiroPermission(req: any, res: Response): Employee | null {
     const user = req.sessionUser as Employee | undefined;
@@ -728,10 +734,10 @@ export function registerPaymentReceiptRoutes(
       }
 
       // Clean expired staged shares
-      paymentStoreState.stagedShares = paymentStoreState.stagedShares.filter(
+      currentPaymentState().stagedShares = currentPaymentState().stagedShares.filter(
         (s) => s.expiresAtMs > Date.now()
       );
-      paymentStoreState.stagedShares.unshift(staged);
+      currentPaymentState().stagedShares.unshift(staged);
       savePaymentStore();
 
       // If client explicitly wants JSON (e.g. automated test or API caller), return JSON; otherwise 303 redirect to SPA route
@@ -768,7 +774,7 @@ export function registerPaymentReceiptRoutes(
   // Retrieve server-staged share target payload
   app.get('/api/pagamentos/shared-staging/:shareId', (req: Request, res: Response) => {
     const shareId = String(req.params.shareId || '');
-    const found = paymentStoreState.stagedShares.find(
+    const found = currentPaymentState().stagedShares.find(
       (s) => s.id === shareId && s.expiresAtMs > Date.now()
     );
     if (!found) {
@@ -792,8 +798,8 @@ export function registerPaymentReceiptRoutes(
       savePaymentStore();
     }
 
-    const enrichedFreights = paymentStoreState.freights.map((f) => enrichFreightWithReceipts(f));
-    const userActiveIntents = paymentStoreState.intents.filter(
+    const enrichedFreights = currentPaymentState().freights.map((f) => enrichFreightWithReceipts(f));
+    const userActiveIntents = currentPaymentState().intents.filter(
       (i) => i.responsibleUserId === user.id && i.status === 'AGUARDANDO_COMPROVANTE'
     );
 
@@ -816,10 +822,10 @@ export function registerPaymentReceiptRoutes(
       return;
     }
 
-    const existingIdx = paymentStoreState.freights.findIndex((f) => f.id === incoming.id);
+    const existingIdx = currentPaymentState().freights.findIndex((f) => f.id === incoming.id);
     if (existingIdx >= 0) {
       // Synchronization may not rewrite amounts, rules, receipts or bank-confirmed state.
-      const current = paymentStoreState.freights[existingIdx];
+      const current = currentPaymentState().freights[existingIdx];
       const immutable = ['valorTotal','valorAdiantamento','valorSaldo','regraTipo','percentualAdiantamento','percentualSaldo','adiantamentoPago','saldoPago','status'] as const;
       if (immutable.some(key => incoming[key] !== undefined && incoming[key] !== current[key])) {
         res.status(409).json({error:'O registro financeiro já existe. Valores e pagamentos devem ser tratados no fluxo autorizado.'});return;
@@ -835,13 +841,13 @@ export function registerPaymentReceiptRoutes(
     }
     const fresh={...incoming,adiantamentoPago:false,saldoPago:false,adiantamentoVerificacaoStatus:'SEM_COMPROVANTE' as const,saldoVerificacaoStatus:'SEM_COMPROVANTE' as const};
     for (const key of ['historicoPagamentos','comprovantesList','adiantamentoComprovanteId','saldoComprovanteId','adiantamentoConfirmadoPorId','saldoConfirmadoPorId','adiantamentoConfirmadoEm','saldoConfirmadoEm','codigoTransacaoAdiantamento','codigoTransacaoSaldo']) delete (fresh as any)[key];
-    paymentStoreState.freights.unshift(fresh);
+    currentPaymentState().freights.unshift(fresh);
     savePaymentStore();
 
     res.status(201).json({
       ok: true,
       freight: enrichFreightWithReceipts(
-        paymentStoreState.freights.find((f) => f.id === incoming.id)!
+        currentPaymentState().freights.find((f) => f.id === incoming.id)!
       ),
     });
   });
@@ -851,14 +857,14 @@ export function registerPaymentReceiptRoutes(
     if (!user) return;
 
     const freightId = String(req.params.freightId || '');
-    const existingIdx = paymentStoreState.freights.findIndex((f) => f.id === freightId);
+    const existingIdx = currentPaymentState().freights.findIndex((f) => f.id === freightId);
     if (existingIdx === -1) {
       res.status(404).json({ error: 'Frete não encontrado.' });
       return;
     }
 
     const patch = req.body || {};
-    const current = paymentStoreState.freights[existingIdx];
+    const current = currentPaymentState().freights[existingIdx];
 
     if (patch.status === 'Pago' && current.status !== 'Pago') {
       res.status(409).json({error:'A confirmação de pagamento exige o fluxo bancário autorizado.'});return;
@@ -876,7 +882,7 @@ export function registerPaymentReceiptRoutes(
       docs: patch.docs ? { ...current.docs, ...patch.docs } : current.docs,
     };
 
-    paymentStoreState.freights[existingIdx] = updated;
+    currentPaymentState().freights[existingIdx] = updated;
     savePaymentStore();
 
     res.json({
@@ -909,7 +915,7 @@ export function registerPaymentReceiptRoutes(
       return;
     }
 
-    const freight = paymentStoreState.freights.find((f) => f.id === String(freightId));
+    const freight = currentPaymentState().freights.find((f) => f.id === String(freightId));
     if (!freight) {
       res.status(404).json({
         error: 'Frete não encontrado.',
@@ -931,7 +937,7 @@ export function registerPaymentReceiptRoutes(
     }
 
     // If the exact same user already has an active intent for the exact same freight + installment, cancel/supersede it cleanly
-    for (const existing of paymentStoreState.intents) {
+    for (const existing of currentPaymentState().intents) {
       if (
         existing.responsibleUserId === user.id &&
         existing.freightId === freight.id &&
@@ -982,7 +988,7 @@ export function registerPaymentReceiptRoutes(
       status: 'AGUARDANDO_COMPROVANTE',
     };
 
-    paymentStoreState.intents.unshift(intent);
+    currentPaymentState().intents.unshift(intent);
 
     appendPaymentAuditHistory({
       freightId: freight.id,
@@ -1029,11 +1035,11 @@ export function registerPaymentReceiptRoutes(
       savePaymentStore();
     }
 
-    const eligibleIntents = paymentStoreState.intents.filter(
+    const eligibleIntents = currentPaymentState().intents.filter(
       (i) => i.responsibleUserId === user.id && i.status === 'AGUARDANDO_COMPROVANTE'
     );
 
-    const recentUserIntents = paymentStoreState.intents
+    const recentUserIntents = currentPaymentState().intents
       .filter((i) => i.responsibleUserId === user.id)
       .slice(0, 20);
 
@@ -1059,7 +1065,7 @@ export function registerPaymentReceiptRoutes(
       if (!user) return;
 
       const intentId = String(req.params.intentId || '');
-      const intent = paymentStoreState.intents.find((i) => i.id === intentId);
+      const intent = currentPaymentState().intents.find((i) => i.id === intentId);
       if (!intent) {
         res.status(404).json({ error: 'Intenção de pagamento não encontrada.' });
         return;
@@ -1168,7 +1174,7 @@ export function registerPaymentReceiptRoutes(
         return;
       }
 
-      const freightIdx = paymentStoreState.freights.findIndex((f) => f.id === freightId);
+      const freightIdx = currentPaymentState().freights.findIndex((f) => f.id === freightId);
       if (freightIdx === -1) {
         res.status(404).json({
           error: 'Frete selecionado não foi encontrado no servidor.',
@@ -1176,12 +1182,12 @@ export function registerPaymentReceiptRoutes(
         });
         return;
       }
-      const freight = paymentStoreState.freights[freightIdx];
+      const freight = currentPaymentState().freights[freightIdx];
 
       // If an intentId was provided, verify that the intent belongs to the logged-in user and matches the freight/installment
       let matchedIntent: PaymentIntentRecord | undefined;
       if (intentId) {
-        matchedIntent = paymentStoreState.intents.find((i) => i.id === intentId);
+        matchedIntent = currentPaymentState().intents.find((i) => i.id === intentId);
         if (!matchedIntent) {
           res.status(400).json({
             error: 'A intenção de pagamento informada não existe.',
@@ -1210,7 +1216,7 @@ export function registerPaymentReceiptRoutes(
 
       // Idempotency check: prevent duplicate creation on network retry
       if (idempotencyKey) {
-        const existingIdempotent = paymentStoreState.receipts.find(
+        const existingIdempotent = currentPaymentState().receipts.find(
           (r) => r.idempotencyKey === idempotencyKey && r.uploadedByUserId === user.id
         );
         if (existingIdempotent) {
@@ -1247,10 +1253,10 @@ export function registerPaymentReceiptRoutes(
 
       // Compute SHA-256 hash to detect duplicate file uploads
       const sha256Hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-      const duplicateReceipt = paymentStoreState.receipts.find((r) => r.sha256Hash === sha256Hash);
+      const duplicateReceipt = currentPaymentState().receipts.find((r) => r.sha256Hash === sha256Hash);
 
       // Check if this freight + installment already has an attached receipt (for audit trail of replacement without silent overwrite)
-      const previousInstallmentReceipt = paymentStoreState.receipts.find(
+      const previousInstallmentReceipt = currentPaymentState().receipts.find(
         (r) => r.freightId === freight.id && r.installmentType === installmentType
       );
 
@@ -1312,7 +1318,7 @@ export function registerPaymentReceiptRoutes(
         downloadUrl: `/api/pagamentos/comprovantes/${receiptId}/download`,
       };
 
-      paymentStoreState.receipts.unshift(receiptRecord);
+      currentPaymentState().receipts.unshift(receiptRecord);
 
       if (matchedIntent) {
         matchedIntent.status = 'COMPROVANTE_VINCULADO';
@@ -1417,7 +1423,7 @@ export function registerPaymentReceiptRoutes(
       }
 
       const receiptId = String(req.params.receiptId || '');
-      const receipt = paymentStoreState.receipts.find((r) => r.id === receiptId);
+      const receipt = currentPaymentState().receipts.find((r) => r.id === receiptId);
       if (!receipt) {
         res.status(404).json({
           error: 'Comprovante não encontrado no servidor.',
@@ -1426,7 +1432,7 @@ export function registerPaymentReceiptRoutes(
         return;
       }
 
-      const freight = paymentStoreState.freights.find((f) => f.id === receipt.freightId);
+      const freight = currentPaymentState().freights.find((f) => f.id === receipt.freightId);
       if (!freight) {
         res.status(404).json({
           error: 'Frete vinculado ao comprovante não foi encontrado.',
@@ -1458,7 +1464,7 @@ export function registerPaymentReceiptRoutes(
       }
 
       if (receipt.intentId) {
-        const linkedIntent = paymentStoreState.intents.find((i) => i.id === receipt.intentId);
+        const linkedIntent = currentPaymentState().intents.find((i) => i.id === receipt.intentId);
         if (linkedIntent) {
           linkedIntent.status = 'CONCLUIDA';
         }
@@ -1544,7 +1550,7 @@ export function registerPaymentReceiptRoutes(
       if (!user) return;
 
       const receiptId = String(req.params.receiptId || '');
-      const receipt = paymentStoreState.receipts.find((r) => r.id === receiptId);
+      const receipt = currentPaymentState().receipts.find((r) => r.id === receiptId);
       if (!receipt) {
         res.status(404).json({
           error: 'Comprovante não encontrado.',
@@ -1581,9 +1587,9 @@ export function registerPaymentReceiptRoutes(
       if (!user) return;
 
       const freightId = String(req.params.freightId || '');
-      const receipts = paymentStoreState.receipts.filter((r) => r.freightId === freightId);
-      const history = paymentStoreState.history.filter((h) => h.freightId === freightId);
-      const intents = paymentStoreState.intents.filter((i) => i.freightId === freightId);
+      const receipts = currentPaymentState().receipts.filter((r) => r.freightId === freightId);
+      const history = currentPaymentState().history.filter((h) => h.freightId === freightId);
+      const intents = currentPaymentState().intents.filter((i) => i.freightId === freightId);
 
       res.json({
         ok: true,

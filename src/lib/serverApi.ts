@@ -1,3 +1,4 @@
+import { portalFetch as fetch } from './apiTransport';
 import {newRequestKey} from './requestKey';
 import {
   AccessDecisionRecord,

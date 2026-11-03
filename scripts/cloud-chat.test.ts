@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator, doc, getDoc, setDoc, query, collection, where, orderBy, limit, onSnapshot, getDocs } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, getDoc, setDoc } from 'firebase/firestore';
 import { firebaseTestRuntime } from '../src/server/firebase-test/runtime';
 import { FirestoreChatService, membershipId } from '../src/server/cloud/chat';
 import { createCloudApi } from '../src/server/cloud/api';
 import { FirestoreFreightStore } from '../src/server/cloud/freightStore';
 import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
 import { bootstrapAdmin } from '../src/server/cloud/bootstrapAdmin';
+import { verifyRemoteModules } from './cloud-modules.integration';
 
 test('Administrador: provisionamento único, primeiro acesso e revogação', async () => {
   const runtime = firebaseTestRuntime(), uid = 'bootstrap-test';
@@ -53,7 +54,7 @@ test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura
   const server = createCloudApi({ auth, db }).listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
-  let stop: () => void = () => {};
+
   try {
     assert.equal((await fetch(base + '/api/cloud/session')).status, 401);
     assert.equal((await fetch(base + '/api/cloud/session', { headers: { Authorization: 'Bearer invalid' } })).status, 401);
@@ -67,19 +68,13 @@ test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura
     await assert.rejects(getDoc(doc(stores[2], 'conversations', conversation.id)));
     await assert.rejects(setDoc(doc(stores[0], 'users', ids[0]), { accessLevel: 'ADMINISTRADOR' }, { merge: true }));
 
-    const received = new Promise<void>((resolve, reject) => {
-      stop = onSnapshot(query(collection(stores[1], 'messages'), where('conversationId', '==', conversation.id),
-        orderBy('sequence', 'desc'), limit(40)), snapshot => {
-        if (snapshot.docs.some(d => d.data().text === 'Mensagem persistida')) resolve();
-      }, reject);
-    });
     const [first, retried] = await Promise.all([
       service.send(ids[0], conversation.id, 'Mensagem persistida', 'one-click'),
       service.send(ids[0], conversation.id, 'Mensagem persistida', 'one-click'),
     ]);
     assert.equal(first.id, retried.id);
-    await Promise.race([received, new Promise((_, reject) => setTimeout(() => reject(Error('Listener não recebeu mensagem')), 10000))]);
-    stop();
+    assert.equal((await service.messages(ids[1], conversation.id))[0].id, first.id);
+
     await assert.rejects(service.send(ids[0], conversation.id, 'Conteúdo diferente', 'one-click'), { status: 409 });
     const concurrent = await Promise.all([service.send(ids[0], conversation.id, 'Segunda', 'second'), service.send(ids[1], conversation.id, 'Terceira', 'third')]);
     assert.deepEqual(concurrent.map(m => (m as any).sequence).sort(), [2, 3]);
@@ -89,20 +84,20 @@ test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura
     assert.equal(receipt.lastReadSequence, 3);
     assert.equal((await service.read(ids[1], conversation.id, 1)).lastReadSequence, 3);
     await assert.rejects(service.read(ids[1], conversation.id, 99));
-    assert.equal((await getDoc(doc(stores[0], 'message_reads', membershipId(conversation.id, ids[1])))).data()!.lastReadSequence, 3);
+    assert.equal((await db.collection('message_reads').doc(membershipId(conversation.id, ids[1])).get()).data()!.lastReadSequence, 3);
     await assert.rejects(service.updateMessage(ids[1], first.id, 'Editar outro autor'), { status: 403 });
     await service.updateMessage(ids[0], first.id, 'Mensagem editada');
-    assert.equal((await getDoc(doc(stores[1], 'messages', first.id))).data()!.text, 'Mensagem editada');
+    assert.equal((await db.collection('messages').doc(first.id).get()).data()!.text, 'Mensagem editada');
     const reloaded = new FirestoreChatService(db);
     assert.equal((await reloaded.create(ids[0], input)).id, conversation.id);
-    const listed = await getDocs(query(collection(stores[1], 'messages'), where('conversationId', '==', conversation.id), orderBy('sequence', 'desc'), limit(40)));
-    assert.equal(listed.size, 3);
+    await assert.rejects(getDoc(doc(stores[0], 'conversations', conversation.id)));
+    await assert.rejects(getDoc(doc(stores[1], 'messages', first.id)));
     assert.equal((await service.list(ids[0])).length, 1);
     assert.equal((await service.messages(ids[1], conversation.id)).length, 3);
     assert.equal((await service.messages(ids[1], conversation.id, 2)).length, 1);
     await assert.rejects(service.messages(ids[2], conversation.id), { status: 403 });
     await service.updateMessage(ids[0], first.id, null);
-    assert.equal((await getDoc(doc(stores[1], 'messages', first.id))).data()!.deleted, true);
+    assert.equal((await db.collection('messages').doc(first.id).get()).data()!.deleted, true);
 
     const group = await service.create(ids[0], { participants: [ids[1]], isGroup: true, name: 'Grupo de Testes', key: 'group' });
     assert.ok((await db.collection('groups').doc(group.id).get()).exists);
@@ -114,7 +109,7 @@ test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura
     await assert.rejects(service.send(ids[1], conversation.id, 'Conta suspensa', 'fourth'), { status: 403 });
     await assert.rejects(getDoc(doc(stores[1], 'conversations', conversation.id)));
   } finally {
-    stop();
+
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await Promise.all(clients.map(deleteApp));
   }
@@ -192,3 +187,5 @@ test('Login corporativo Firebase: sessão persistida, cinco tentativas transacio
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
+
+test('APIs remotas: fretes, fila RH, agenda, mural e grupos persistentes', verifyRemoteModules);

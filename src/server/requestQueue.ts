@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Express } from 'express';
 import type { Employee, InternalRequest, RequestAttachment, RequestStatus } from '../types';
-import { hasPagePermission } from '../lib/permissions';
+import { hasPagePermission } from '../lib/permissions.js';
 
 const DESTINATIONS = ['Recursos Humanos', 'Administrativo', 'Financeiro'];
 const STATUSES: RequestStatus[] = ['Aberta', 'Em análise', 'Em andamento', 'Aguardando funcionário', 'Concluída', 'Cancelada'];
@@ -17,13 +17,14 @@ export function canHandleRequest(u: Employee, r: InternalRequest): boolean {
     (u.accessProfile === 'FINANCEIRO' && r.targetDepartment === 'Financeiro'));
 }
 
-export function registerRequestQueue(app: Express, guard: any, users: () => Employee[], initial: InternalRequest[] = []) {
+export function registerRequestQueue(app: Express, guard: any, users: () => Employee[], initial: InternalRequest[] = [], remoteState?: QueueState) {
   const directory = path.join(process.env.RODOVAR_DATA_ROOT || process.cwd(), 'data');
   const file = path.join(directory, 'requests-server.json');
   const attachmentsDir = path.join(directory, 'request-attachments');
-  const state: QueueState = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) :
-    { requests: structuredClone(initial), notifications: [], keys: {} };
+  const state: QueueState = remoteState || (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) :
+    { requests: structuredClone(initial), notifications: [], keys: {} });
   const save = () => {
+    if (remoteState) return;
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(file + '.tmp', JSON.stringify(state, null, 2));
     fs.renameSync(file + '.tmp', file);

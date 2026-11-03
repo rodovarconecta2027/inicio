@@ -22,4 +22,6 @@ export function registerCloudChatRoutes(app: Express, guard: RequestHandler, ser
     service.updateMessage(req.sessionUser.id, req.params.id, req.body?.text)));
   app.delete('/api/cloud/chat/messages/:id', guard, route(req =>
     service.updateMessage(req.sessionUser.id, req.params.id, null)));
+  app.patch('/api/cloud/chat/conversations/:id', guard, route(req => service.updateGroup(req.sessionUser.id, req.params.id, req.body || {})));
+  app.post('/api/cloud/chat/messages/:id/decoration', guard, route(req => service.decorate(req.sessionUser.id, req.params.id, req.body || {})));
 }

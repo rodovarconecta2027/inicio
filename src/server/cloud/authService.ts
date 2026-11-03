@@ -114,6 +114,21 @@ export class CloudAuthService {
     await batch.commit();
   }
 
+  async updateProfile(sessionId: string, csrf: string, input: { name?: unknown; phoneExt?: unknown }) {
+    const current = await this.session(sessionId);
+    if (csrf !== current.csrfToken || current.user.mustChangePassword)
+      throw error('Atualize a sessão e confirme o primeiro acesso.', 403, 'PROFILE_FORBIDDEN');
+    const name = typeof input.name === 'string' ? input.name.trim() : current.user.name;
+    const phoneExt = typeof input.phoneExt === 'string' ? input.phoneExt.trim() : current.user.phoneExt;
+    if (name.length < 3 || name.length > 120 || /[<>]/.test(name) || phoneExt.length > 40 || /[^0-9+() .-]/.test(phoneExt))
+      throw error('Confira o nome e o telefone corporativo.', 400, 'INVALID_PROFILE');
+    const batch = this.runtime.db.batch();
+    batch.update(this.runtime.db.collection('employee_profiles').doc(current.user.id), { name, phoneExt });
+    batch.create(this.runtime.db.collection('audit_logs').doc(), { actorId: current.user.id, action: 'PROFILE_UPDATED', atIso: new Date().toISOString() });
+    await batch.commit();
+    return { ok: true, user: { ...current.user, name, phoneExt } };
+  }
+
   async firstPassword(sessionId: string, csrf: string, password: string) {
     const current = await this.session(sessionId);
     if (csrf !== current.csrfToken) throw error('Atualize a sessão.', 403, 'CSRF_INVALID');

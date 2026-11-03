@@ -1,7 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import type {Express} from 'express';
 export const agendaCreator=(u:any)=>u.accessLevel==='ADMINISTRADOR'||['DIRETORIA','RH'].includes(u.accessProfile)||u.accessLevel==='DIRETORIA'||u.roleTitle==='Gerência Administrativa'||u.permissoesPaginas?.includes('agenda_criar');
-export function registerAgenda(app:Express,guard:any,users:()=>any[]){
- const file=path.join(process.env.RODOVAR_DATA_ROOT||process.cwd(),'data','agenda-local.json');const state:any=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{events:[],notifications:[],imported:false,keys:{}};const save=()=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);};
+export function registerAgenda(app:Express,guard:any,users:()=>any[],remoteState?:any){
+ const file=path.join(process.env.RODOVAR_DATA_ROOT||process.cwd(),'data','agenda-local.json');const state:any=remoteState||(fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{events:[],notifications:[],imported:false,keys:{}});const save=()=>{if(remoteState)return;fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(state));fs.renameSync(file+'.tmp',file);};
  const manage=(e:any,u:any)=>u.accessLevel==='ADMINISTRADOR'||agendaCreator(u)&&(e.ownerId===u.id||!e.ownerId&&['DIRETORIA','RH'].includes(u.accessProfile));
  const invited=(e:any,u:any)=>e.visibility==='Todos'||e.invitees?.includes(u.id)||e.sectors?.includes(u.department)||e.ownerId===u.id||(!e.visibility);
  const visible=(e:any,u:any)=>manage(e,u)||invited(e,u);

@@ -3,10 +3,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type {Express} from 'express';
 export const canManagePolls=(u:any)=>u?.accessLevel==='ADMINISTRADOR'||['DIRETORIA','FINANCEIRO','RH'].includes(u?.accessProfile)||u?.accessLevel==='DIRETORIA'||u?.roleTitle==='Gerência Administrativa';
-export function registerPolls(app:Express,guard:any,storageFile=path.join(process.env.RODOVAR_DATA_ROOT||process.cwd(),'data','mural-polls.local.json')){
- const polls:any[]=fs.existsSync(storageFile)?JSON.parse(fs.readFileSync(storageFile,'utf8')):[];
+export function registerPolls(app:Express,guard:any,storageFile=path.join(process.env.RODOVAR_DATA_ROOT||process.cwd(),'data','mural-polls.local.json'),remotePolls?:any[]){
+ const polls:any[]=remotePolls||(fs.existsSync(storageFile)?JSON.parse(fs.readFileSync(storageFile,'utf8')):[]);
  if(!Array.isArray(polls))throw Error('Arquivo local de enquetes inválido.');
- const save=()=>{fs.mkdirSync(path.dirname(storageFile),{recursive:true});const temporary=storageFile+'.tmp';fs.writeFileSync(temporary,JSON.stringify(polls),{mode:0o600});fs.renameSync(temporary,storageFile);};
+ const save=()=>{if(remotePolls)return;fs.mkdirSync(path.dirname(storageFile),{recursive:true});const temporary=storageFile+'.tmp';fs.writeFileSync(temporary,JSON.stringify(polls),{mode:0o600});fs.renameSync(temporary,storageFile);};
  app.use('/api/mural-polls',(_req,res,next)=>{res.setHeader('Cache-Control','no-store');next();});
  const view=(p:any,u:any)=>{const total=Object.keys(p.votes).length,own=p.votes[u.id],ended=p.closed||Date.now()>=Date.parse(p.deadline),show=canManagePolls(u)||p.results==='always'||own!==undefined||ended;return {id:p.id,question:p.question,options:p.options,deadline:p.deadline,closed:ended,draft:p.draft,results:p.results,total,own,counts:show?p.options.map((_:any,i:number)=>Object.values(p.votes).filter(v=>v===i).length):null};};
  app.get('/api/mural-polls',guard,(req:any,res)=>res.json({canManage:canManagePolls(req.sessionUser),polls:polls.filter(p=>!p.draft||canManagePolls(req.sessionUser)).map(p=>view(p,req.sessionUser))}));

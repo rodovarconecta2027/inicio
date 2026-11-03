@@ -1,5 +1,5 @@
 import {FreightRecord,UnifiedFreightRecord} from '../types';
-import {expeditionPaymentMode} from '../lib/expeditionValidation';
+import {expeditionPaymentMode} from '../lib/expeditionValidation.js';
 export function financialProjection(f:UnifiedFreightRecord,existing?:FreightRecord):FreightRecord|null{
  if(['NAO_LIBERADO','DEVOLVIDO_EXPEDICAO'].includes(f.situacaoMonitoramento||'NAO_LIBERADO')||f.situacaoOperacional==='CANCELADO')return null;
  const mode=expeditionPaymentMode(f.condicoesPagamento),cents=f.valorContratadoCentavos;

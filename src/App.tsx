@@ -1,3 +1,5 @@
+import { RemoteApiStatus } from './components/RemoteApiStatus';
+import { portalFetch as fetch, CLOUD_MODE } from './lib/apiTransport';
 import {HomePremium} from './components/HomePremium';
 import {validatePortalBackup} from './lib/adminBackup';
 import {portalLoading} from './lib/portalLoading';
@@ -344,6 +346,7 @@ export default function App() {
 
   const [currentUserId, setCurrentUserId] = useState<string>('emp-admin-master');
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_announcements_v1');
       if (saved) {
@@ -358,6 +361,7 @@ export default function App() {
     return INITIAL_ANNOUNCEMENTS.map(normalizeAnnouncementTo2027);
   });
   const [notifications, setNotifications] = useState<CorporateNotification[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_notifications_v1');
       if (saved) {
@@ -370,6 +374,7 @@ export default function App() {
     return INITIAL_NOTIFICATIONS;
   });
   const [events, setEvents] = useState<CorporateEvent[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_events_v1');
       if (saved) {
@@ -386,6 +391,7 @@ export default function App() {
   const [requests, setRequests] = useState<InternalRequest[]>([]);
 
   const [documents, setDocuments] = useState<CorporateDocument[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_documents_v1');
       if (saved) {
@@ -400,6 +406,7 @@ export default function App() {
     return normalizeDocumentsTo2027(INITIAL_DOCUMENTS);
   });
   const [chats, setChats] = useState<ChatThread[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_chats_v1');
       if (saved) {
@@ -412,6 +419,7 @@ export default function App() {
     return INITIAL_CHATS;
   });
   const [invites, setInvites] = useState<EmployeeInvite[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_invites_v1');
       if (saved) {
@@ -424,6 +432,7 @@ export default function App() {
     return INITIAL_INVITES;
   });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
+    if (CLOUD_MODE) return [];
     try {
       const saved = localStorage.getItem('rodovar_conecta_audit_logs_v1');
       if (saved) {
@@ -435,7 +444,7 @@ export default function App() {
     }
     return INITIAL_AUDIT_LOGS;
   });
-  const [freights, setFreights] = useState<FreightRecord[]>(() => loadFreightsFromStorage());
+  const [freights, setFreights] = useState<FreightRecord[]>(() => CLOUD_MODE ? [] : loadFreightsFromStorage());
 
   // Interactive Modals on Dashboard
   const [selectedAnnouncementModal, setSelectedAnnouncementModal] =
@@ -477,8 +486,8 @@ export default function App() {
 
   const currentUser =
     employees.find((e) => e && e.id === currentUserId) ||
-    employees.find((e) => e && e.id) ||
-    INITIAL_EMPLOYEES[0];
+    (!CLOUD_MODE && employees.find((e) => e && e.id)) ||
+    (CLOUD_MODE ? { id: '', name: '', department: 'Administrativo', roleTitle: '', accessLevel: 'FUNCIONARIO', active: false, approvalStatus: 'PENDENTE', email: '', avatar: '/assets/default-avatar.png', phone: '', location: '', joinedAt: '' } as Employee : INITIAL_EMPLOYEES[0]);
 
   // Global keyboard shortcut Ctrl+K / Cmd+K for Unified Corporate Search
   useEffect(() => {
@@ -500,7 +509,7 @@ export default function App() {
       const sanitized = employees
         .filter((e) => e && typeof e === 'object' && e.id)
         .map(({ password: _pw, ...rest }) => rest);
-      localStorage.setItem('rodovar_conecta_employees_v1', JSON.stringify(sanitized));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_employees_v1', JSON.stringify(sanitized));
     } catch (err) {
       console.debug('Employees storage save info:', err);
     }
@@ -508,14 +517,14 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('rodovar_conecta_announcements_v1', JSON.stringify(announcements));
-      localStorage.setItem('rodovar_conecta_notifications_v1', JSON.stringify(notifications));
-      localStorage.setItem('rodovar_conecta_events_v1', JSON.stringify(events));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_announcements_v1', JSON.stringify(announcements));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_notifications_v1', JSON.stringify(notifications));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_events_v1', JSON.stringify(events));
       // Legacy browser requests are preserved for administrator review, never overwritten by a filtered queue.
-      localStorage.setItem('rodovar_conecta_documents_v1', JSON.stringify(documents));
-      localStorage.setItem('rodovar_conecta_chats_v1', JSON.stringify(chats));
-      localStorage.setItem('rodovar_conecta_invites_v1', JSON.stringify(invites));
-      localStorage.setItem('rodovar_conecta_audit_logs_v1', JSON.stringify(auditLogs));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_documents_v1', JSON.stringify(documents));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_chats_v1', JSON.stringify(chats));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_invites_v1', JSON.stringify(invites));
+      if (!CLOUD_MODE) localStorage.setItem('rodovar_conecta_audit_logs_v1', JSON.stringify(auditLogs));
     } catch (err) {
       console.debug('Corporate collections storage save info:', err);
     }
@@ -640,7 +649,7 @@ export default function App() {
   useEffect(() => {
     if(!isAuthenticated || currentUser.mustChangePassword)return;
     const controller=new AbortController();
-    const load=async()=>{try{const response=await fetch('/api/employees',{headers:getAuthHeaders(),signal:controller.signal});if(response.ok){const data=await response.json();if(!controller.signal.aborted)setEmployees(data.employees);}}catch{}};
+    const load=async()=>{try{const response=await fetch('/api/employees',{headers:getAuthHeaders(),signal:controller.signal});if(response.ok){const data=await response.json();if(!controller.signal.aborted)setEmployees(previous => data.employees.map((employee: Employee) => employee.id === currentUserId ? { ...previous.find(p => p.id === currentUserId), ...employee } : employee));}}catch{}};
     load();const timer=setInterval(load,10000);return()=>{controller.abort();clearInterval(timer);};
   },[isAuthenticated,currentUserId,currentUser.mustChangePassword]);
 
@@ -2769,6 +2778,12 @@ export default function App() {
 
   const handleToggleEmployeeActive = async (empId: string) => {
     const target = employees.find((e) => e.id === empId);
+    if (CLOUD_MODE) {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(empId)}`, { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ active: !target?.active }) });
+      const data = await response.json();
+      if (!response.ok) { alert(data.error || 'Não foi possível atualizar a conta.'); return; }
+      setEmployees(prev => prev.map(e => e.id === empId ? data.user : e)); return;
+    }
     setEmployees((prev) =>
       prev.map((e) => (e.id === empId ? { ...e, active: !e.active } : e))
     );
@@ -2817,7 +2832,9 @@ export default function App() {
         );
         return;
       }
+      if (CLOUD_MODE) { alert(json.error || 'Não foi possível criar a conta no servidor.'); return; }
     } catch (err) {
+      if (CLOUD_MODE) { alert('Não foi possível conectar ao servidor. Nenhuma conta foi criada localmente.'); return; }
       console.debug('Server user create fallback:', err);
     }
 
@@ -2870,13 +2887,19 @@ export default function App() {
     }
   ) => {
     try {
-      await fetch(`/api/admin/users/${encodeURIComponent(empId)}`, {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(empId)}`, {
         method: 'PUT',
         headers: getAuthHeaders(true),
         credentials: 'include',
         body: JSON.stringify(updates),
       });
+      if (CLOUD_MODE) {
+        const data = await response.json();
+        if (!response.ok) { alert(data.error || 'Não foi possível salvar a conta.'); return; }
+        setEmployees(prev => prev.map(e => e.id === empId ? data.user : e)); return;
+      }
     } catch (err) {
+      if (CLOUD_MODE) { alert('Não foi possível salvar no servidor. Tente novamente.'); return; }
       console.debug('Admin user update server sync info:', err);
     }
 
@@ -3256,6 +3279,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#080B0D] text-[#15191D] flex flex-col">
+      <RemoteApiStatus />
       {/* =====================================================================
           MOBILE NATIVE VIEWPORT (< 768px)
       ===================================================================== */}

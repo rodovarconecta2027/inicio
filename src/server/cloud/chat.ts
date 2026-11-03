@@ -18,7 +18,7 @@ export class FirestoreChatService {
       const memberships = await tx.get(this.db.collection('conversation_members').where('userId', '==', uid).limit(100));
       const active = memberships.docs.filter(doc => doc.data().active);
       const conversations = await Promise.all(active.map(doc => tx.get(this.db.collection('conversations').doc(doc.data().conversationId))));
-      return conversations.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() }))
+      return conversations.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data(), lastReadSequence: active.find(m => m.data().conversationId === doc.id)?.data().lastReadSequence || 0 }))
         .sort((a: any, b: any) => String(b.updatedAtIso).localeCompare(String(a.updatedAtIso)));
     });
   }
@@ -78,7 +78,7 @@ export class FirestoreChatService {
       if (existing.exists) return { id, ...existing.data() };
       const now = new Date().toISOString();
       const conversation = { isGroup: Boolean(input.isGroup), name: input.isGroup ? name : '',
-        createdBy: uid, createdAtIso: now, updatedAtIso: now, messageCount: 0, lastMessage: '' };
+        participantIds: participants, createdBy: uid, createdAtIso: now, updatedAtIso: now, messageCount: 0, lastMessage: '' };
       tx.create(ref, conversation);
       for (const userId of participants) {
         const member = { conversationId: id, userId, active: true, role: userId === uid ? 'owner' : 'member', lastReadSequence: 0, joinedAtIso: now };
@@ -143,6 +143,53 @@ export class FirestoreChatService {
       tx.update(ref, { lastReadSequence });
       tx.set(this.db.collection('message_reads').doc(membershipId(conversationId, uid)), receipt);
       return receipt;
+    });
+  }
+
+  async updateGroup(uid: string, conversationId: string, input: { participantIds?: string[]; pinnedNotice?: string }) {
+    if (input.participantIds !== undefined && (!Array.isArray(input.participantIds) || input.participantIds.length > 99 || input.participantIds.some(id => !identifier(id)))) fail('Participantes inválidos.');
+    if (input.pinnedNotice !== undefined && (typeof input.pinnedNotice !== 'string' || input.pinnedNotice.length > 2000)) fail('Aviso inválido.');
+    return this.db.runTransaction(async tx => {
+      const { member } = await this.member(tx, uid, conversationId);
+      const ref = this.db.collection('conversations').doc(conversationId), snapshot = await tx.get(ref), conversation = snapshot.data();
+      if (!conversation?.isGroup || member.role !== 'owner') fail('Somente o responsável pode gerenciar o grupo.', 403);
+      const participants = input.participantIds ? [...new Set([uid, ...input.participantIds])].sort() : conversation!.participantIds;
+      if (!Array.isArray(participants) || participants.length < 2) fail('O grupo precisa de pelo menos dois participantes.');
+      for (const id of participants) this.communication(await this.authorized(tx, id));
+      const oldMembers = await tx.get(this.db.collection('conversation_members').where('conversationId', '==', conversationId));
+      const atIso = new Date().toISOString();
+      for (const doc of oldMembers.docs) {
+        const active = participants.includes(doc.data().userId);
+        tx.update(doc.ref, { active });
+        tx.set(this.db.collection('group_members').doc(doc.id), { ...doc.data(), active });
+      }
+      for (const id of participants) if (!oldMembers.docs.some(d => d.data().userId === id)) {
+        const value = { conversationId, userId: id, active: true, role: 'member', lastReadSequence: 0, joinedAtIso: atIso };
+        tx.create(this.db.collection('conversation_members').doc(membershipId(conversationId, id)), value);
+        tx.create(this.db.collection('group_members').doc(membershipId(conversationId, id)), value);
+      }
+      tx.update(ref, { participantIds: participants, pinnedNotice: input.pinnedNotice ?? conversation!.pinnedNotice ?? '', updatedAtIso: atIso });
+      tx.create(this.db.collection('audit_logs').doc(), { actorId: uid, targetId: conversationId, action: 'GROUP_UPDATED', atIso });
+      return { ok: true };
+    });
+  }
+
+  async decorate(uid: string, messageId: string, input: { pinned?: boolean; reaction?: string }) {
+    if (!identifier(messageId) || (input.pinned === undefined && input.reaction === undefined) || (input.pinned !== undefined && typeof input.pinned !== 'boolean') || (input.reaction !== undefined && !['👍','✅','❤️','😂','👏','🚛','🙏','😮','😢'].includes(input.reaction))) fail('Ação inválida.');
+    return this.db.runTransaction(async tx => {
+      const ref = this.db.collection('messages').doc(messageId), snapshot = await tx.get(ref), message = snapshot.data();
+      if (!message || message.deleted) fail('Mensagem indisponível.', 404);
+      const { member } = await this.member(tx, uid, message!.conversationId);
+      if (input.pinned !== undefined && member.role !== 'owner') fail('Somente o responsável pode fixar mensagens.', 403);
+      const patch: any = {};
+      if (input.pinned !== undefined) patch.pinned = input.pinned === true;
+      if (input.reaction) {
+        const reactions = { ...(message!.reactionsByUser || {}) };
+        if (reactions[uid] === input.reaction) delete reactions[uid]; else reactions[uid] = input.reaction;
+        patch.reactionsByUser = reactions;
+      }
+      tx.update(ref, patch);
+      return { ok: true };
     });
   }
 }

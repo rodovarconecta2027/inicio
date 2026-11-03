@@ -10,8 +10,13 @@ export function cloudSessionId(req: Request): string {
 export function registerCloudAuthRoutes(app: Express, service: CloudAuthService) {
   app.put('/api/cloud/profile', async (req, res, next) => {
     try {
-      if (Object.keys(req.body || {}).some(key => key !== 'password')) {
-        res.status(400).json({ error: 'Esta operação permite apenas definir a senha de primeiro acesso.' }); return;
+      const keys = Object.keys(req.body || {});
+      if (keys.length && keys.every(key => ['name', 'phoneExt'].includes(key))) {
+        res.json(await service.updateProfile(cloudSessionId(req), String(req.headers['x-csrf-token'] || ''), req.body));
+        return;
+      }
+      if (keys.length !== 1 || keys[0] !== 'password') {
+        res.status(400).json({ error: 'Campos de perfil não autorizados.' }); return;
       }
       const result = await service.firstPassword(cloudSessionId(req), String(req.headers['x-csrf-token'] || ''), req.body?.password);
       res.cookie('rodovar_cloud_sid', result.sessionId, { httpOnly: true, secure: Boolean(process.env.VERCEL) || req.secure,

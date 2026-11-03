@@ -1,3 +1,4 @@
+import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import React,{useEffect,useState} from 'react';
 import {getAuthHeaders} from '../lib/serverApi';
 export function CorporatePolls(){

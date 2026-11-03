@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Express } from 'express';
-import { hasPagePermission } from '../lib/permissions';
+import { hasPagePermission } from '../lib/permissions.js';
 
 export interface RhBillingProvider {
   name: string;
@@ -18,16 +18,16 @@ function validDocument(value:string) {
   return digit(value.slice(0,12),[5,4,3,2,9,8,7,6,5,4,3,2])===Number(value[12])&&digit(value.slice(0,13),[6,5,4,3,2,9,8,7,6,5,4,3,2])===Number(value[13]);
 }
 
-export function registerExternalRh(app:Express, guard:any, provider?:RhBillingProvider) {
+export function registerExternalRh(app:Express, guard:any, provider?:RhBillingProvider, remoteState?: Record<string, unknown>) {
   const dir=path.join(process.env.RODOVAR_DATA_ROOT || process.cwd(),'data','rh-external');
-  fs.mkdirSync(dir,{recursive:true});
+  if (!remoteState) fs.mkdirSync(dir,{recursive:true});
   const keyFile=path.join(dir,'encryption.key');
-  if(!fs.existsSync(keyFile)) fs.writeFileSync(keyFile,crypto.randomBytes(32),{mode:0o600,flag:'wx'});
-  const key=fs.readFileSync(keyFile), file=path.join(dir,'records.enc');
-  const encrypt=(bytes:Buffer)=>{const iv=crypto.randomBytes(12), cipher=crypto.createCipheriv('aes-256-gcm',key,iv);const encrypted=Buffer.concat([cipher.update(bytes),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),encrypted]);};
-  const decrypt=(bytes:Buffer)=>{const decipher=crypto.createDecipheriv('aes-256-gcm',key,bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));return Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]);};
-  const state:any=fs.existsSync(file)?JSON.parse(decrypt(fs.readFileSync(file)).toString()):{clients:[],services:[],requests:[],keys:{},events:{}};
-  const save=()=>{fs.writeFileSync(file+'.tmp',encrypt(Buffer.from(JSON.stringify(state))),{mode:0o600});fs.renameSync(file+'.tmp',file);};
+  if(!remoteState && !fs.existsSync(keyFile)) fs.writeFileSync(keyFile,crypto.randomBytes(32),{mode:0o600,flag:'wx'});
+  const key=remoteState ? undefined : fs.readFileSync(keyFile), file=path.join(dir,'records.enc');
+  const encrypt=(bytes:Buffer)=>{const iv=crypto.randomBytes(12), cipher=crypto.createCipheriv('aes-256-gcm',key!,iv);const encrypted=Buffer.concat([cipher.update(bytes),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),encrypted]);};
+  const decrypt=(bytes:Buffer)=>{const decipher=crypto.createDecipheriv('aes-256-gcm',key!,bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));return Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]);};
+  const state:any=remoteState ?? (fs.existsSync(file)?JSON.parse(decrypt(fs.readFileSync(file)).toString()):{clients:[],services:[],requests:[],keys:{},events:{}});
+  const save=()=>{if (remoteState) return; fs.writeFileSync(file+'.tmp',encrypt(Buffer.from(JSON.stringify(state))),{mode:0o600});fs.renameSync(file+'.tmp',file);};
   const audit=(r:any,u:any,action:string)=>r.history.push({id:crypto.randomUUID(),at:new Date().toISOString(),actorId:u.id,actorName:u.name,action});
   const fail=(res:any,status:number,error:string)=>res.status(status).json({error});
   const rh=(req:any,res:any,next:any)=>canAccessExternalRh(req.sessionUser)?(res.setHeader('Cache-Control','no-store'),next()):fail(res,403,'Acesso exclusivo à permissão RH.');

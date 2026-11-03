@@ -1,3 +1,4 @@
+import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import {compareRecent} from '../lib/activityOrder';
 import {CorporatePolls} from './CorporatePolls';
 import {useGlobalLoading} from './GlobalLoading';
@@ -19,7 +20,7 @@ export function MuralPremium({currentUser,initial,onHydrated}:{currentUser:Emplo
  const inFlight=useRef(false),submitKey=useRef(muralClientKey()),commentKey=useRef(muralClientKey()),dialog=useRef<HTMLElement>(null),closeButton=useRef<HTMLButtonElement>(null),previousFocus=useRef<HTMLElement|null>(null);
  const req=async(url:string,body?:any,key?:string)=>{const response=await fetch(url,{method:body?'POST':'GET',headers:{...getAuthHeaders(),...(body?{'x-idempotency-key':key||muralClientKey()}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();if(!response.ok)throw Error(data.error||'Não foi possível completar a operação.');return data;};
  const load=async()=>{const data=await req('/api/mural');setRows(data.announcements);setCanPublish(data.canPublish);onHydrated?.(data.announcements,data.notifications);setLoading(false);};
- useEffect(()=>{let cancelled=false;(async()=>{try{if(currentUser.accessLevel==='ADMINISTRADOR')await req('/api/mural/import',{announcements:initial});if(!cancelled)await load();}catch(e){if(!cancelled){setError((e as Error).message);setLoading(false);}}})();return()=>{cancelled=true;};},[currentUser.id]);
+ useEffect(()=>{let cancelled=false;(async()=>{try{if(!CLOUD_MODE&&currentUser.accessLevel==='ADMINISTRADOR')await req('/api/mural/import',{announcements:initial});if(!cancelled)await load();}catch(e){if(!cancelled){setError((e as Error).message);setLoading(false);}}})();return()=>{cancelled=true;};},[currentUser.id]);
  useEffect(()=>{const timer=setInterval(()=>{if(document.visibilityState==='visible')void load().catch(e=>setError((e as Error).message));},15000);return()=>clearInterval(timer);},[currentUser.id]);
  const run=async(fn:()=>Promise<void>)=>{if(inFlight.current)return;inFlight.current=true;setBusy(true);setError('');try{await fn();}catch(e){setError((e as Error).message);}finally{inFlight.current=false;setBusy(false);}};
  const active=rows.filter(a=>!a.archived&&!a.draft),pending=(a:any)=>a.requireReadConfirmation&&!a.readReceipts.some((r:any)=>r.userId===currentUser.id),read=(a:any)=>a.readReceipts.some((r:any)=>r.userId===currentUser.id);

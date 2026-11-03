@@ -1,3 +1,5 @@
+import { CLOUD_MODE } from '../lib/apiTransport';
+import { CloudChatView } from './CloudChatView';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Send,
@@ -38,7 +40,9 @@ export interface SendMessageOptions {
   forwardedFrom?: string;
 }
 
-interface WhatsAppChatViewProps {
+export interface WhatsAppChatViewProps {
+  onSelectThread?: (id: string) => void;
+  onReact?: (id: string, reaction: string) => void;
   activeSection: 'mensagens' | 'grupos';
   currentUser: Employee;
   employees: Employee[];
@@ -49,7 +53,7 @@ interface WhatsAppChatViewProps {
     attachment?: string,
     attachmentSize?: string,
     extra?: SendMessageOptions
-  ) => void;
+  ) => void | Promise<boolean>;
   onMarkThreadRead: (threadId: string) => void;
   onCreateGroupChat?: (groupData: {
     name: string;
@@ -57,12 +61,12 @@ interface WhatsAppChatViewProps {
     roleOrDept: string;
     pinnedNotice?: string;
     participantIds: string[];
-  }) => void;
+  }) => void | Promise<boolean>;
   onUpdateThreadPinnedNotice?: (threadId: string, pinnedNotice: string) => void;
   onTogglePinMessage?: (threadId: string, messageId: string) => void;
   onDeleteMessage?: (threadId: string, messageId: string) => void;
   onManageGroupParticipants?: (threadId: string, participantIds: string[]) => void;
-  onStartDirectChat: (emp: Employee) => string | void;
+  onStartDirectChat: (emp: Employee) => string | void | Promise<string | void>;
   onForwardToTargets?: (
     targetEmployeeIds: string[],
     targetGroupIds: string[],
@@ -201,7 +205,7 @@ const WhatsAppAudioPlayer: React.FC<{
       {/* Avatar with Mic Badge */}
       <div className="relative shrink-0">
         <img
-          src={senderAvatar || '/assets/avatar-joao.jpg'}
+          src={senderAvatar || '/assets/default-avatar.png'}
           alt="Voz"
           referrerPolicy="no-referrer"
           className="w-10 h-10 rounded-full object-cover border border-emerald-500/40"
@@ -298,7 +302,10 @@ const SAMPLE_VIDEOS = [
   },
 ];
 
-export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
+export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = props => CLOUD_MODE ? <CloudChatView {...props}/> : <WhatsAppChatPresentation {...props}/>;
+
+export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
+  onSelectThread, onReact,
   activeSection,
   currentUser,
   employees,
@@ -365,7 +372,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
   const [shareSuccessToast, setShareSuccessToast] = useState<string | null>(null);
 
   // Local reactions per message ID
-  const [messageReactions, setMessageReactions] = useState<Record<string, string[]>>({
+  const [messageReactions, setMessageReactions] = useState<Record<string, string[]>>(CLOUD_MODE ? {} : {
     'm-1': ['👍', '✅'],
     'gm-1': ['🚛', '👏'],
   });
@@ -400,13 +407,16 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeThread?.id, activeThread?.messages.length]);
 
+  useEffect(() => { if (activeThread?.id) onSelectThread?.(activeThread.id); }, [activeThread?.id]);
+
   const triggerToast = (msg: string) => {
+    if (CLOUD_MODE) return;
     setShareSuccessToast(msg);
     setTimeout(() => setShareSuccessToast(null), 3500);
   };
 
   // Start or switch to an employee conversation in 1 click
-  const handleSelectEmployeeChat = (emp: Employee) => {
+  const handleSelectEmployeeChat = async (emp: Employee) => {
     const existing = chats.find(
       (c) =>
         !c.isGroup &&
@@ -417,7 +427,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
       setSelectedChatId(existing.id);
       onMarkThreadRead(existing.id);
     } else {
-      const maybeNewId = onStartDirectChat(emp);
+      const maybeNewId = await onStartDirectChat(emp);
       if (typeof maybeNewId === 'string') {
         setSelectedChatId(maybeNewId);
       } else {
@@ -621,15 +631,16 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
   };
 
   // Handle text message send
-  const handleSendText = () => {
+  const handleSendText = async () => {
     if (!activeThread || !messageText.trim()) return;
-    onSendMessage(activeThread.id, messageText.trim());
+    if (await onSendMessage(activeThread.id, messageText.trim()) === false) return;
     setMessageText('');
     setShowEmojiPicker(false);
   };
 
   // Toggle reaction on message
   const toggleReaction = (msgId: string, emoji: string) => {
+    if (onReact) { onReact(msgId, emoji); setActiveReactionMsgId(null); return; }
     setMessageReactions((prev) => {
       const current = prev[msgId] || [];
       const exists = current.includes(emoji);
@@ -764,7 +775,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
     const matchedEmp = employees.find(
       (e) => e.name.toLowerCase() === thread.name.toLowerCase()
     );
-    return matchedEmp?.avatar || '/assets/avatar-joao.jpg';
+    return matchedEmp?.avatar || '/assets/default-avatar.png';
   };
 
   return (
@@ -789,7 +800,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
                 RODOVAR ZAP CORPORATIVO
               </h1>
               <span className="bg-[#00A884]/20 text-[#00E676] border border-[#00A884]/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                ● Online em Tempo Real
+                {CLOUD_MODE ? 'Comunicação interna' : '● Online em Tempo Real'}
               </span>
             </div>
             <p className="text-xs text-gray-300">
@@ -853,7 +864,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
             </div>
 
             <span className="text-[10px] font-bold bg-[#00A884]/15 text-[#008069] px-2 py-0.5 rounded-full">
-              {activeEmployees.length + 1} online
+              {CLOUD_MODE ? `${activeEmployees.length} colaboradores` : `${activeEmployees.length + 1} online`}
             </span>
           </div>
 
@@ -989,7 +1000,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
                   >
                     <div className="relative shrink-0">
                       <img
-                        src={emp.avatar || '/assets/avatar-joao.jpg'}
+                        src={emp.avatar || '/assets/default-avatar.png'}
                         alt={emp.name}
                         referrerPolicy="no-referrer"
                         className="w-10 h-10 rounded-full object-cover border border-gray-200"
@@ -1047,7 +1058,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
                         {activeThread.name}
                       </h2>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E7FCE3] text-[#008069]">
-                        Online
+                        {CLOUD_MODE ? 'Colaborador' : 'Online'}
                       </span>
                     </div>
                     <p className="text-[11px] text-gray-500 truncate">
@@ -1854,7 +1865,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
-                          src={emp.avatar || '/assets/avatar-joao.jpg'}
+                          src={emp.avatar || '/assets/default-avatar.png'}
                           alt={emp.name}
                           referrerPolicy="no-referrer"
                           className="w-8 h-8 rounded-full object-cover"
@@ -2117,9 +2128,9 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (!newGroupForm.name.trim()) return;
-                  onCreateGroupChat?.(newGroupForm);
+                  if (await onCreateGroupChat?.(newGroupForm) === false) return;
                   setShowNewGroupModal(false);
                   triggerToast(`✓ Grupo "${newGroupForm.name}" criado!`);
                 }}
@@ -2160,7 +2171,7 @@ export const WhatsAppChatView: React.FC<WhatsAppChatViewProps> = ({
                   >
                     <div className="flex items-center gap-2">
                       <img
-                        src={emp.avatar || '/assets/avatar-joao.jpg'}
+                        src={emp.avatar || '/assets/default-avatar.png'}
                         alt={emp.name}
                         className="w-7 h-7 rounded-full object-cover"
                       />

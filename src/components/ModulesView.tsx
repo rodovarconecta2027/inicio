@@ -1,3 +1,4 @@
+import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import {CorporateModal} from './ui/CorporateModal';
 import {DriverCenter} from './DriverCenter';
 import {getAuthHeaders} from '../lib/serverApi';

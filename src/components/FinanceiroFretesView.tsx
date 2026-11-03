@@ -1,3 +1,4 @@
+import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import {useNotificationRecord} from '../hooks/useNotificationRecord';
 import './PortalModernizacao.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';

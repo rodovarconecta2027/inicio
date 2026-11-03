@@ -1,5 +1,5 @@
 {
-  "firestore": { "rules": "firestore.cloud.rules", "indexes": "firestore.cloud.indexes.json" },
+  "firestore": { "rules": "firestore.homologation.rules", "indexes": "firestore.homologation.indexes.json" },
   "emulators": {
     "auth": { "host": "127.0.0.1", "port": 9099 },
     "firestore": { "host": "127.0.0.1", "port": 8080 },

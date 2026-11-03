@@ -1,12 +1,12 @@
-import {registerPolls} from './muralPolls';
+import {registerPolls} from './muralPolls.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {Express} from 'express';
-import {hasPagePermission} from '../lib/permissions';
+import {hasPagePermission} from '../lib/permissions.js';
 import type {Announcement,Employee} from '../types';
-export function registerMural(app:Express,guard:any,db:any,save:()=>void,initial:Announcement[]){
- registerPolls(app,guard);
+export function registerMural(app:Express,guard:any,db:any,save:()=>void,initial:Announcement[],remote=false){
+ if(!remote) registerPolls(app,guard);
  const directory=path.join(process.env.RODOVAR_DATA_ROOT||process.cwd(),'data','mural-attachments');
  db.mural ||= {announcements:structuredClone(initial),notifications:[],keys:{},audit:[],imported:false};
  const state=db.mural;

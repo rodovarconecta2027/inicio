@@ -1,3 +1,4 @@
+import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,

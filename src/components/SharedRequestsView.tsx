@@ -1,3 +1,4 @@
+import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import './SharedRequestsPremium.css';
 import {useGlobalLoading} from './GlobalLoading';
 import {useNotificationRecord} from '../hooks/useNotificationRecord';

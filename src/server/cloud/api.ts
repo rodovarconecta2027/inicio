@@ -1,3 +1,6 @@
+import { getDefaultSystemConfig } from './branding.js';
+import { registerCloudModuleRoutes } from './moduleRoutes.js';
+import { registerCloudFreightRoutes } from './freightRoutes.js';
 import express, { type RequestHandler } from 'express';
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
@@ -19,6 +22,11 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   });
+  app.get(['/api/cloud/system-config', '/api/cloud/system-config/version'], async (req, res, next) => {
+    try { const stored = await db.collection('system_settings').doc('branding').get(); const config = stored.exists ? stored.data() : getDefaultSystemConfig();
+      res.json(req.path.endsWith('/version') ? { revision: config!.revision } : { systemConfig: config, defaults: getDefaultSystemConfig() });
+    } catch (error) { next(error); }
+  });
   const passwordVerifier = options.passwordVerifier || (process.env.FIREBASE_WEB_API_KEY ? firebasePasswordVerifier({
     projectId: 'rodovar-conecta-hml-60770', apiKey: process.env.FIREBASE_WEB_API_KEY,
   }) : undefined);
@@ -34,7 +42,7 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
         status: sessions ? 'ok' : 'configuration_required', environment: 'homologation',
         persistence: 'firestore', migration: 'partial',
         authentication: sessions ? 'configured' : 'not_configured',
-        portalIntegration: 'auth_only',
+        portalIntegration: 'auth_freights_chat_corporate',
       });
     } catch (error) { next(error); }
   });
@@ -66,6 +74,12 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   };
   app.get('/api/cloud/session', guard, (req: any, res) => res.json({ authenticated: true, user: req.sessionUser }));
   registerCloudChatRoutes(app, guard, new FirestoreChatService(db));
+  registerCloudFreightRoutes(app, guard, db);
+  registerCloudModuleRoutes(app, guard, db);
+  app.use('/api/cloud', guard, (req, res, next) => {
+    if (/^\/(admin|pagamentos|drivers|rh-external|customer-covers|documents)(\/|$)/.test(req.path)) { res.status(503).json({ error: 'Este serviço ainda não foi migrado para a homologação remota. Nenhum dado foi alterado.', code: 'MODULE_NOT_MIGRATED' }); return; }
+    next();
+  });
   app.use((_req, res) => res.status(404).json({ error: 'Operação fora do adaptador de migração.', code: 'CLOUD_ROUTE_NOT_FOUND' }));
   app.use((error: any, _req: any, res: any, _next: any) => {
     const status = [400, 401, 403, 404, 409, 429].includes(error.status) ? error.status : 503;

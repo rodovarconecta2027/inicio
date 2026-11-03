@@ -1,4 +1,5 @@
-import {expeditionPaymentMode,effectiveExpeditionChecklist,expeditionChecklistCount} from '../lib/expeditionValidation';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import {expeditionPaymentMode,effectiveExpeditionChecklist,expeditionChecklistCount} from '../lib/expeditionValidation.js';
 import { Express, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -30,7 +31,7 @@ import {
   canAccessMonitoramentoFreights,
   canViewFreightTeam,
   hasPagePermission,
-} from '../lib/permissions';
+} from '../lib/permissions.js';
 
 export const RODOVAR_CNPJ = '49.908.710/0001-03';
 export const RODOVAR_RAZAO_SOCIAL = 'RODOVAR LOGÍSTICA E TRANSPORTES RODOVIÁRIOS LTDA';
@@ -92,13 +93,23 @@ export interface ServerNotificationRecord extends CorporateNotification {
   dedupeKey?: string;
 }
 
-// In-memory index of individual freight documents for fast cursor queries and atomic locks
-const freightsIndex = new Map<string, UnifiedFreightRecord>();
-const freightSubDocs = new Map<string, FreightSubDocument>();
-const idempotencyCache = new Map<string, { timestamp: number; status: number; body: unknown }>();
-const activeFreightLocks = new Set<string>();
-let serverNotifications: ServerNotificationRecord[] = [];
-let nextProtocolNumber = 843;
+/** Each remote transaction owns its state. Local server keeps its existing file-backed state. */
+export interface FreightEngineState {
+  freightsIndex: Map<string, UnifiedFreightRecord>;
+  freightSubDocs: Map<string, FreightSubDocument>;
+  idempotencyCache: Map<string, { timestamp: number; status: number; body: unknown }>;
+  activeFreightLocks: Set<string>;
+  serverNotifications: ServerNotificationRecord[];
+  nextProtocolNumber: number;
+}
+export const emptyFreightEngineState = (nextProtocolNumber: number): FreightEngineState => ({
+  freightsIndex: new Map(), freightSubDocs: new Map(), idempotencyCache: new Map(),
+  activeFreightLocks: new Set(), serverNotifications: [], nextProtocolNumber,
+});
+const remoteFreightContext = new AsyncLocalStorage<FreightEngineState>();
+const localFreightState = emptyFreightEngineState(843);
+const engineState = () => remoteFreightContext.getStore() || localFreightState;
+export const withFreightEngineState = <T>(state: FreightEngineState, action: () => T): T => remoteFreightContext.run(state, action);
 
 function ensureDirectories() {
   if (!fs.existsSync(FREIGHTS_STORE_DIR)) {
@@ -120,6 +131,7 @@ function getFreightSubDocPath(freightId: string): string {
 }
 
 function writeJsonAtomically(targetPath: string, data: unknown): void {
+  if (remoteFreightContext.getStore()) return; // Firestore adapter commits after validation.
   ensureDirectories();
   const tmp = `${targetPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
@@ -218,13 +230,13 @@ function syncSubDocCounters(freight: UnifiedFreightRecord, sub: FreightSubDocume
 
 const financeListeners = new Set<(freight:UnifiedFreightRecord)=>void>();
 export const subscribeUnifiedFinance=(listener:(freight:UnifiedFreightRecord)=>void)=>{financeListeners.add(listener);return ()=>financeListeners.delete(listener);};
-export const unifiedFinanceFreights=()=>[...freightsIndex.values()].filter(f=>f.situacaoMonitoramento!=='NAO_LIBERADO'&&f.situacaoMonitoramento!=='DEVOLVIDO_EXPEDICAO'&&f.situacaoOperacional!=='CANCELADO');
+export const unifiedFinanceFreights=()=>[...engineState().freightsIndex.values()].filter(f=>f.situacaoMonitoramento!=='NAO_LIBERADO'&&f.situacaoMonitoramento!=='DEVOLVIDO_EXPEDICAO'&&f.situacaoOperacional!=='CANCELADO');
 export function persistFreightAndSubDoc(
   freight: UnifiedFreightRecord,
   sub?: FreightSubDocument
 ): void {
   const existingSub = sub ||
-    freightSubDocs.get(freight.id) || {
+    engineState().freightSubDocs.get(freight.id) || {
       freightId: freight.id,
       anexos: [],
       comentarios: [],
@@ -232,19 +244,19 @@ export function persistFreightAndSubDoc(
       historico: [],
     };
   syncSubDocCounters(freight, existingSub);
-  freightsIndex.set(freight.id, freight);
-  freightSubDocs.set(freight.id, existingSub);
+  engineState().freightsIndex.set(freight.id, freight);
+  engineState().freightSubDocs.set(freight.id, existingSub);
   writeJsonAtomically(getFreightDocPath(freight.id), freight);
   writeJsonAtomically(getFreightSubDocPath(freight.id), existingSub);
-  for (const listener of financeListeners) listener(freight);
+  if (!remoteFreightContext.getStore()) for (const listener of financeListeners) listener(freight);
 }
 
 function saveNotifications(): void {
-  writeJsonAtomically(NOTIFICATIONS_FILE, serverNotifications);
+  writeJsonAtomically(NOTIFICATIONS_FILE, engineState().serverNotifications);
 }
 
 function saveSequence(): void {
-  writeJsonAtomically(SEQUENCE_FILE, { nextProtocolNumber });
+  writeJsonAtomically(SEQUENCE_FILE, { nextProtocolNumber: engineState().nextProtocolNumber });
 }
 
 export function formatProtocolNumber(seq: number): string {
@@ -256,7 +268,7 @@ export function formatProtocolNumber(seq: number): string {
 
 export function normalizeFreightProtocol(raw: string): string {
   const clean = String(raw || '').trim();
-  if (!clean) return formatProtocolNumber(nextProtocolNumber++);
+  if (!clean) return formatProtocolNumber(engineState().nextProtocolNumber++);
   if (/^RDV-\d+$/i.test(clean)) {
     const num = parseInt(clean.replace(/^RDV-/i, ''), 10);
     return formatProtocolNumber(num);
@@ -269,7 +281,7 @@ export function normalizeFreightProtocol(raw: string): string {
 }
 
 export function allocateNextProtocol(): string {
-  const num = nextProtocolNumber++;
+  const num = engineState().nextProtocolNumber++;
   saveSequence();
   return formatProtocolNumber(num);
 }
@@ -285,7 +297,7 @@ export function pushFreightNotification(params: {
 }): void {
   if (!params.recipientId) return;
   if (params.dedupeKey) {
-    const exists = serverNotifications.some(
+    const exists = engineState().serverNotifications.some(
       (n) => n.recipientId === params.recipientId && n.dedupeKey === params.dedupeKey
     );
     if (exists) return;
@@ -305,9 +317,9 @@ export function pushFreightNotification(params: {
     targetId: params.targetId,
     dedupeKey: params.dedupeKey,
   };
-  serverNotifications.unshift(notif);
-  if (serverNotifications.length > 500) {
-    serverNotifications = serverNotifications.slice(0, 500);
+  engineState().serverNotifications.unshift(notif);
+  if (!remoteFreightContext.getStore() && engineState().serverNotifications.length > 500) {
+    engineState().serverNotifications = engineState().serverNotifications.slice(0, 500);
   }
   saveNotifications();
 }
@@ -455,9 +467,9 @@ export function loadOrSeedUnifiedFreights(): void {
   if (fs.existsSync(NOTIFICATIONS_FILE)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, 'utf8'));
-      if (Array.isArray(parsed)) serverNotifications = parsed;
+      if (Array.isArray(parsed)) engineState().serverNotifications = parsed;
     } catch {
-      serverNotifications = [];
+      engineState().serverNotifications = [];
     }
   }
 
@@ -465,7 +477,7 @@ export function loadOrSeedUnifiedFreights(): void {
     try {
       const seq = JSON.parse(fs.readFileSync(SEQUENCE_FILE, 'utf8'));
       if (seq && typeof seq.nextProtocolNumber === 'number') {
-        nextProtocolNumber = Math.max(843, seq.nextProtocolNumber);
+        engineState().nextProtocolNumber = Math.max(843, seq.nextProtocolNumber);
       }
     } catch {
       // ignore
@@ -478,8 +490,8 @@ export function loadOrSeedUnifiedFreights(): void {
   );
 
   if (freightDocFiles.length > 0) {
-    freightsIndex.clear();
-    freightSubDocs.clear();
+    engineState().freightsIndex.clear();
+    engineState().freightSubDocs.clear();
     for (const file of freightDocFiles) {
       try {
         const fullPath = path.join(FREIGHTS_STORE_DIR, file);
@@ -498,16 +510,16 @@ export function loadOrSeedUnifiedFreights(): void {
           }
           const mutated = normalizeLegacyFreightRecord(rec);
           syncSubDocCounters(rec, sub);
-          freightsIndex.set(rec.id, rec);
-          freightSubDocs.set(rec.id, sub);
+          engineState().freightsIndex.set(rec.id, rec);
+          engineState().freightSubDocs.set(rec.id, sub);
           if (mutated) {
             writeJsonAtomically(fullPath, rec);
           }
 
           const numMatch = rec.protocol.replace('#', '');
           const parsedNum = parseInt(numMatch, 10);
-          if (!isNaN(parsedNum) && parsedNum >= nextProtocolNumber) {
-            nextProtocolNumber = parsedNum + 1;
+          if (!isNaN(parsedNum) && parsedNum >= engineState().nextProtocolNumber) {
+            engineState().nextProtocolNumber = parsedNum + 1;
           }
         }
       } catch (err) {
@@ -1160,12 +1172,13 @@ export function registerUnifiedFreightRoutes(
     action: string,
     details: string,
     ip?: string
-  ) => void
+  ) => void,
+  options: { remote?: boolean } = {}
 ): void {
-  loadOrSeedUnifiedFreights();
+  if (!options.remote) loadOrSeedUnifiedFreights();
   const idemFile = path.join(FREIGHTS_STORE_DIR, '_idempotency.json');
-  if (fs.existsSync(idemFile)) {
-    for (const [key,value] of Object.entries(JSON.parse(fs.readFileSync(idemFile,'utf8')))) idempotencyCache.set(key,value as any);
+  if (!options.remote && fs.existsSync(idemFile)) {
+    for (const [key,value] of Object.entries(JSON.parse(fs.readFileSync(idemFile,'utf8')))) engineState().idempotencyCache.set(key,value as any);
   }
 
   // Helper to check idempotency key per user
@@ -1175,7 +1188,7 @@ export function registerUnifiedFreightRoutes(
       (req.body && typeof req.body.idempotencyKey === 'string' ? req.body.idempotencyKey : '');
     if (!rawKey) { res.status(400).json({error:'Identificador de envio obrigatório.'}); return '__HANDLED__'; }
     const compositeKey = `${userId}:${req.method}:${req.path}:${rawKey}`;
-    const existing = idempotencyCache.get(compositeKey);
+    const existing = engineState().idempotencyCache.get(compositeKey);
     if (existing) {
       res.status(existing.status).json(existing.body);
       return '__HANDLED__';
@@ -1189,15 +1202,15 @@ export function registerUnifiedFreightRoutes(
     body: unknown
   ): void {
     if (!compositeKey || compositeKey === '__HANDLED__') return;
-    idempotencyCache.set(compositeKey, {
+    engineState().idempotencyCache.set(compositeKey, {
       timestamp: Date.now(),
       status,
       body,
     });
-    writeJsonAtomically(idemFile, Object.fromEntries(idempotencyCache));
-    if (idempotencyCache.size > 2000) {
-      const oldestKey = idempotencyCache.keys().next().value;
-      if (oldestKey) idempotencyCache.delete(oldestKey);
+    writeJsonAtomically(idemFile, Object.fromEntries(engineState().idempotencyCache));
+    if (engineState().idempotencyCache.size > 2000) {
+      const oldestKey = engineState().idempotencyCache.keys().next().value;
+      if (oldestKey) engineState().idempotencyCache.delete(oldestKey);
     }
   }
 
@@ -1275,7 +1288,7 @@ export function registerUnifiedFreightRoutes(
   // --------------------------------------------------------------------------
   app.get('/api/meus-fretes/notifications', requireApprovedSession, (req: any, res: Response) => {
     const user = req.sessionUser as Employee;
-    const myNotifs = serverNotifications
+    const myNotifs = engineState().serverNotifications
       .filter((n) => n.recipientId === user.id)
       .sort((a, b) => (b.createdAtIso || '').localeCompare(a.createdAtIso || ''))
       .slice(0, 50);
@@ -1291,7 +1304,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const notifId = String(req.params.notifId || '');
-      const target = serverNotifications.find(
+      const target = engineState().serverNotifications.find(
         (n) => n.id === notifId && n.recipientId === user.id
       );
       if (target) {
@@ -1308,7 +1321,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       let changed = false;
-      serverNotifications.forEach((n) => {
+      engineState().serverNotifications.forEach((n) => {
         if (n.recipientId === user.id && !n.read) {
           n.read = true;
           changed = true;
@@ -1325,11 +1338,11 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const notifId = String(req.params.notifId || '');
-      const idx = serverNotifications.findIndex(
+      const idx = engineState().serverNotifications.findIndex(
         (n) => n.id === notifId && n.recipientId === user.id
       );
       if (idx !== -1) {
-        serverNotifications.splice(idx, 1);
+        engineState().serverNotifications.splice(idx, 1);
         saveNotifications();
       }
       res.json({ ok: true });
@@ -1399,7 +1412,7 @@ export function registerUnifiedFreightRoutes(
       }
     }
 
-    const allRecords = Array.from(freightsIndex.values());
+    const allRecords = Array.from(engineState().freightsIndex.values());
     const todaySp = formatSaoPauloDateTime().dateOnlyIso;
 
     // Step 1: Origin-level ownership filtering (NEVER leak unauthorized records)
@@ -1738,7 +1751,7 @@ export function registerUnifiedFreightRoutes(
   app.get('/api/meus-fretes/:freightId', requireApprovedSession, (req: any, res: Response) => {
     const user = req.sessionUser as Employee;
     const freightId = String(req.params.freightId || '');
-    const freight = freightsIndex.get(freightId);
+    const freight = engineState().freightsIndex.get(freightId);
     if (!freight) {
       res.status(404).json({ error: 'Frete não encontrado.' });
       return;
@@ -1757,7 +1770,7 @@ export function registerUnifiedFreightRoutes(
       freight.situacaoOperacional === 'DISPONIVEL_FILA' &&
       freight.comercialResponsavelId !== user.id;
 
-    const sub = freightSubDocs.get(freight.id) || {
+    const sub = engineState().freightSubDocs.get(freight.id) || {
       freightId: freight.id,
       anexos: [],
       comentarios: [],
@@ -2024,7 +2037,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -2182,7 +2195,7 @@ export function registerUnifiedFreightRoutes(
       freight.updatedAtFormatted = sp.formatted;
       freight.revision += 1;
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const editReason = String(body.reason || body.motivo || '').trim();
 
       // Requirement 6: "Alterações em endereço, motorista, veículo, condições ou datas após transferência de etapa exigem motivo, registro no histórico e notificação ao responsável atual."
@@ -2256,7 +2269,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -2304,7 +2317,7 @@ export function registerUnifiedFreightRoutes(
       if (idemKey === '__HANDLED__') return;
 
       const sp = formatSaoPauloDateTime();
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
 
       if (targetStatus === 'EM_NEGOCIACAO') {
         if (!['CONTRATADO', 'EM_NEGOCIACAO'].includes(freight.situacaoComercial)) {
@@ -2475,7 +2488,7 @@ export function registerUnifiedFreightRoutes(
     }
 
     const freightId = String(req.params.freightId || '');
-    if (activeFreightLocks.has(freightId)) {
+    if (engineState().activeFreightLocks.has(freightId)) {
       res.status(409).json({
         error: 'Este frete está sendo processado simultaneamente por outro operador.',
         code: 'CONCURRENT_LOCK_CONFLICT',
@@ -2483,9 +2496,9 @@ export function registerUnifiedFreightRoutes(
       return;
     }
 
-    activeFreightLocks.add(freightId);
+    engineState().activeFreightLocks.add(freightId);
     try {
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -2511,7 +2524,7 @@ export function registerUnifiedFreightRoutes(
       freight.updatedAtFormatted = sp.formatted;
       freight.revision += 1;
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       appendHistoryEntry(sub, {
         actorId: user.id,
         actorName: user.name,
@@ -2538,7 +2551,7 @@ export function registerUnifiedFreightRoutes(
         freight: sanitizeFreightForUser(freight, user),
       });
     } finally {
-      activeFreightLocks.delete(freightId);
+      engineState().activeFreightLocks.delete(freightId);
     }
   });
 
@@ -2554,7 +2567,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -2731,7 +2744,7 @@ export function registerUnifiedFreightRoutes(
         }
       }
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
 
       // 5 Persisted Functional Verifications
       if (body.checklistFechamento && typeof body.checklistFechamento === 'object') {
@@ -2882,7 +2895,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -2925,7 +2938,7 @@ export function registerUnifiedFreightRoutes(
       }
 
       const sp = formatSaoPauloDateTime();
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
 
       // ACTION 1: EMITIR_ORDEM_CARREGAMENTO / EMITIR_ORDEM (Ordem de Coleta PDF oficial)
       if (action === 'EMITIR_ORDEM_CARREGAMENTO' || action === 'EMITIR_ORDEM') {
@@ -3361,7 +3374,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -3409,7 +3422,7 @@ export function registerUnifiedFreightRoutes(
       }
 
       const sp = formatSaoPauloDateTime();
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const cleanRealTime = String(horarioRealEvento || sp.formatted).trim().slice(0, 60);
       const cleanObs = String(observacoes || rawReason || motivo || '').trim().slice(0, 500);
 
@@ -3674,7 +3687,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -3703,7 +3716,7 @@ export function registerUnifiedFreightRoutes(
         : 'MEDIA';
 
       const sp = formatSaoPauloDateTime();
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const occ: UnifiedFreightOccurrence = {
         id: `focc-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
         freightId: freight.id,
@@ -3795,7 +3808,7 @@ export function registerUnifiedFreightRoutes(
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
       const occId = String(req.params.occId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -3805,7 +3818,7 @@ export function registerUnifiedFreightRoutes(
         return;
       }
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const occ = sub.ocorrencias.find((o) => o.id === occId);
       if (!occ) {
         res.status(404).json({ error: 'Ocorrência não encontrada.' });
@@ -3854,7 +3867,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -3874,7 +3887,7 @@ export function registerUnifiedFreightRoutes(
       }
 
       const sp = formatSaoPauloDateTime();
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const sector: 'COMERCIAL' | 'EXPEDICAO' | 'GESTAO' =
         user.accessLevel !== 'FUNCIONARIO'
           ? 'GESTAO'
@@ -3920,7 +3933,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4000,7 +4013,7 @@ export function registerUnifiedFreightRoutes(
         uploadedAtFormatted: sp.formatted,
       };
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       sub.anexos.unshift(attachment);
       freight.updatedAtIso = sp.iso;
       freight.updatedAtFormatted = sp.formatted;
@@ -4040,7 +4053,7 @@ export function registerUnifiedFreightRoutes(
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
       const attId = String(req.params.attId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4061,7 +4074,7 @@ export function registerUnifiedFreightRoutes(
         return;
       }
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const att = sub.anexos.find((a) => a.id === attId);
       if (!att) {
         res.status(404).json({ error: 'Anexo não encontrado.' });
@@ -4114,7 +4127,7 @@ export function registerUnifiedFreightRoutes(
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
       const attId = String(req.params.attId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4133,7 +4146,7 @@ export function registerUnifiedFreightRoutes(
         return;
       }
 
-      const sub = freightSubDocs.get(freight.id);
+      const sub = engineState().freightSubDocs.get(freight.id);
       const att = sub?.anexos.find((a) => a.id === attId);
       if (!att) {
         res.status(404).json({ error: 'Anexo não encontrado.' });
@@ -4164,7 +4177,7 @@ export function registerUnifiedFreightRoutes(
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
       const attId = String(req.params.attId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4186,7 +4199,7 @@ export function registerUnifiedFreightRoutes(
         return;
       }
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const attIdx = sub.anexos.findIndex((a) => a.id === attId);
       if (attIdx === -1) {
         res.status(404).json({ error: 'Anexo não encontrado.' });
@@ -4232,7 +4245,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4252,7 +4265,7 @@ export function registerUnifiedFreightRoutes(
         return;
       }
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const count = sub.anexos.length;
 
       for (const att of sub.anexos) {
@@ -4295,7 +4308,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4343,7 +4356,7 @@ export function registerUnifiedFreightRoutes(
       }
 
       const sp = formatSaoPauloDateTime();
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       const targetSector = String(sector || 'EXPEDICAO').toUpperCase();
 
       if (targetSector === 'COMERCIAL') {
@@ -4471,7 +4484,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4514,7 +4527,7 @@ export function registerUnifiedFreightRoutes(
       freight.updatedAtFormatted = sp.formatted;
       freight.revision += 1;
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       appendHistoryEntry(sub, {
         actorId: user.id,
         actorName: user.name,
@@ -4576,7 +4589,7 @@ export function registerUnifiedFreightRoutes(
     (req: any, res: Response) => {
       const user = req.sessionUser as Employee;
       const freightId = String(req.params.freightId || '');
-      const freight = freightsIndex.get(freightId);
+      const freight = engineState().freightsIndex.get(freightId);
       if (!freight) {
         res.status(404).json({ error: 'Frete não encontrado.' });
         return;
@@ -4624,7 +4637,7 @@ export function registerUnifiedFreightRoutes(
       freight.updatedAtFormatted = sp.formatted;
       freight.revision += 1;
 
-      const sub = freightSubDocs.get(freight.id)!;
+      const sub = engineState().freightSubDocs.get(freight.id)!;
       appendHistoryEntry(sub, {
         actorId: user.id,
         actorName: user.name,
