@@ -12,6 +12,8 @@ import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from
 import { bootstrapAdmin } from '../src/server/cloud/bootstrapAdmin';
 import { verifyRemoteModules } from './cloud-modules.integration';
 
+let protectedAdminSession: { sessionId: string; csrfToken: string };
+
 test('Administrador: provisionamento único, primeiro acesso e revogação', async () => {
   const runtime = firebaseTestRuntime(), uid = 'bootstrap-test';
   const password = crypto.randomBytes(24).toString('base64url');
@@ -27,6 +29,7 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
   await assert.rejects(service.firstPassword(session.sessionId, session.csrfToken, password), { status: 400 });
   const changed = await service.firstPassword(session.sessionId, session.csrfToken, crypto.randomBytes(24).toString('base64url'));
   assert.equal(changed.user.mustChangePassword, false);
+  protectedAdminSession = changed;
   await assert.rejects(service.session(session.sessionId), { status: 401 });
   assert.equal((await new CloudAuthService(runtime, async () => { throw Error(); }).session(changed.sessionId)).user.id, uid);
 
@@ -272,4 +275,4 @@ test('Login corporativo Firebase: sessão persistida, cinco tentativas transacio
   }
 });
 
-test('APIs remotas: fretes, fila RH, agenda, mural e grupos persistentes', verifyRemoteModules);
+test('APIs remotas: fretes, fila RH, agenda, mural e grupos persistentes e backup operacional', () => verifyRemoteModules(protectedAdminSession));

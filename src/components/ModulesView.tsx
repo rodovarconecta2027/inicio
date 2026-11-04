@@ -2,7 +2,8 @@ import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import {CorporateModal} from './ui/CorporateModal';
 import {DriverCenter} from './DriverCenter';
 import {getAuthHeaders} from '../lib/serverApi';
-import { BrandingBackups, downloadBrandingBackup } from './BrandingBackups';
+import { BrandingBackups } from './BrandingBackups';
+import { OperationalBackups, downloadOperationalBackup } from './OperationalBackups';
 import {validatePortalBackup,backupEmployees} from '../lib/adminBackup';
 import {AdministrationMaster, type AdminArea} from './AdministrationMaster';
 import {AgendaPremium} from './AgendaPremium';
@@ -1413,8 +1414,8 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
   const handleExportGovernanceJsonSnapshot = async () => {
     if (CLOUD_MODE) {
       try {
-        const revision = await downloadBrandingBackup();
-        setExportReportToast('Backup da identidade visual exportado. Revisão ' + revision + '.');
+        await downloadOperationalBackup();
+        setExportReportToast('Backup operacional da homologação exportado.');
       } catch (error) {
         setExportReportToast(error instanceof Error ? error.message : 'Não foi possível exportar o backup.');
       }
@@ -4847,7 +4848,7 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
         onExport={kind=>{if(kind==='reads')handleExportCorporateCsvReport('leituras');else if(kind==='requests')handleExportCorporateCsvReport('sla_solicitacoes');else if(kind==='compliance')handleExportEmployeeComplianceMatrixCsv();else handleExportGovernanceJsonSnapshot();}} />
       <CorporateModal isOpen={showDriverCenter} onClose={()=>setShowDriverCenter(false)} title="Gestão de Motoristas" maxWidth="6xl"><DriverCenter admin/></CorporateModal>
       <section id="am-workspace" className="am-workspace" aria-label="Funcionalidades da Administração">
-        <div className="am-workspace-heading"><div><h2>{({users:'Usuários & Acessos',system:'Sistema',permissions:'Permissões',reports:'Relatórios e Auditoria',backups:'Backups e Restauração'})[masterArea]}</h2><p>{masterArea==='permissions'?'Selecione uma conta e utilize a ação Alterar Permissões.':masterArea==='backups'?(CLOUD_MODE ? 'Backup e restauração da identidade visual da homologação.' : 'Exportação e restauração do estado local do portal.'):'Recursos existentes, permissões e histórico preservados.'}</p></div></div>
+        <div className="am-workspace-heading"><div><h2>{({users:'Usuários & Acessos',system:'Sistema',permissions:'Permissões',reports:'Relatórios e Auditoria',backups:'Backups e Restauração'})[masterArea]}</h2><p>{masterArea==='permissions'?'Selecione uma conta e utilize a ação Alterar Permissões.':masterArea==='backups'?(CLOUD_MODE ? 'Exportação operacional e recuperação da identidade visual da homologação.' : 'Exportação e restauração do estado local do portal.'):'Recursos existentes, permissões e histórico preservados.'}</p></div></div>
         {isStrictAdmin && (masterArea === 'users' || masterArea === 'permissions') && (
           <AccessReleaseTab
             currentUser={currentUser}
@@ -4867,7 +4868,10 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
           />
         )}
 
-{masterArea==='backups' && CLOUD_MODE && <BrandingBackups onRestore={onSystemConfigPublished} />}
+{masterArea==='backups' && CLOUD_MODE && <>
+          <OperationalBackups />
+          <BrandingBackups onRestore={onSystemConfigPublished} />
+        </>}
 {masterArea==='backups'&&!CLOUD_MODE&&<><p className="am-permission-note">Este backup contém os dados carregados pelo portal. Não inclui arquivos armazenados no servidor, sessões, credenciais de autenticação ou bases locais independentes.</p>          {/* Barra de Backup Integral (.JSON), Importação e Restauração de Dados */}
           <div className="am-backup-panel flex flex-col gap-5">
             <div className="text-xs text-gray-300">
@@ -5197,7 +5201,7 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
                 >
                   <span className="flex items-center gap-2">
                     <Folder className="w-4 h-4 text-[#FFD400]" />
-                    <span>Snapshot Local de Governança (.JSON)</span>
+                    <span>{CLOUD_MODE ? 'Backup Operacional (.JSON)' : 'Snapshot Local de Governança (.JSON)'}</span>
                   </span>
                   <Download className="w-4 h-4 text-[#FFD400]" />
                 </button>

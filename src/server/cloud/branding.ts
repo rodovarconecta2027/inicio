@@ -1,6 +1,7 @@
 import type { Express, RequestHandler } from 'express';
 import { isDeepStrictEqual } from 'node:util';
-import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import type { Firestore } from 'firebase-admin/firestore';
+import { actorOf, requireAdmin, requireProtectedAdmin } from './protectedAdmin.js';
 import { brandingAvatars, brandingImages } from '../../lib/brandingAssets.js';
 import type { SystemConfig } from '../../types';
 export function getDefaultSystemConfig(): SystemConfig {
@@ -92,24 +93,6 @@ type BrandingBackup = {
   schemaVersion: 1;
   config: SystemConfig;
 };
-
-type Actor = { id: string; accessLevel: string };
-function actorOf(req: unknown): Actor {
-  return (req as { sessionUser: Actor }).sessionUser;
-}
-
-function requireAdmin() {
-  return Object.assign(new Error('Operação exclusiva do administrador principal.'), { status: 403 });
-}
-
-async function requireProtectedAdmin(tx: Transaction, db: Firestore, actor: Actor) {
-  const [security, user] = await tx.getAll(
-    db.collection('system_settings').doc('security'), db.collection('users').doc(actor.id),
-  );
-  const account = user.data();
-  if (security.data()?.protectedAdminUid !== actor.id || !account?.active ||
-      account.approvalStatus !== 'APROVADO' || account.accessLevel !== 'ADMINISTRADOR') throw requireAdmin();
-}
 
 function validateDraft({ sidebarPoster, topHeader, defaultAvatar, welcomeBanner }: Record<string, any>) {
   const items = welcomeBanner?.items;

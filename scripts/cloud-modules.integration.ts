@@ -4,7 +4,7 @@ import { firebaseTestRuntime } from '../src/server/firebase-test/runtime';
 import { createCloudApi } from '../src/server/cloud/api';
 import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
 
-export async function verifyRemoteModules() {
+export async function verifyRemoteModules(adminSession: { sessionId: string; csrfToken: string }) {
   const runtime = firebaseTestRuntime(); // Refuses real Firebase projects and credentials.
   const verifier = firebasePasswordVerifier({ projectId: 'demo-rodovar-conecta', apiKey: 'emulator-only', emulator: true });
   const sessions = new CloudAuthService(runtime, verifier);
@@ -107,6 +107,32 @@ export async function verifyRemoteModules() {
     assert.equal((await call('mon', `/meus-fretes/${f.id}`)).freight.id, f.id);
     assert.equal((await call('mon', '/requests')).requests.find((r: any) => r.id === request.id).status, 'Concluída');
     assert.equal((await call('other', `/chat/conversations/${group.id}/messages`))[0].text, 'Mensagem de teste persistida');
+    const exportPath = '/admin/backups/operations/export';
+    await call('dir', exportPath, {}, 'POST', 403);
+    const adminHeaders = { 'Content-Type': 'application/json', 'X-Rodovar-Session': adminSession.sessionId, 'X-CSRF-Token': adminSession.csrfToken };
+    const exportResponse = await fetch(base + exportPath, { method: 'POST', headers: adminHeaders });
+    assert.equal(exportResponse.status, 200);
+    assert.equal(exportResponse.headers.get('cache-control'), 'no-store');
+    assert.match(exportResponse.headers.get('content-disposition') || '', /attachment/);
+    const json = await exportResponse.text();
+    const backup = JSON.parse(json);
+    assert.equal(backup.format, 'rodovar-homologation-operations');
+    assert.deepEqual(backup.scope, ['freights', 'freightDetails', 'events', 'announcements', 'requests']);
+    assert.equal(backup.collections.freights.find((row: any) => row.id === f.id).record.situacaoMonitoramento, 'FINALIZADO');
+    assert.ok(backup.collections.freightDetails.some((row: any) => row.id === f.id && row.record.historico.length > 0));
+    assert.ok(backup.collections.events.some((row: any) => row.id === event.id && row.cancelled));
+    assert.ok(backup.collections.announcements.some((row: any) => row.id === announcement.id && row.comments.length === 1));
+    assert.ok(backup.collections.requests.some((row: any) => row.id === request.id && row.status === 'Concluída'));
+    assert.ok(!json.includes('Mensagem de teste persistida'));
+    assert.ok(!json.includes(external.id));
+    const verify = (content: string) => fetch(base + '/admin/backups/operations/validate', {
+      method: 'POST', headers: adminHeaders,
+      body: JSON.stringify({ sha256: crypto.createHash('sha256').update(content).digest('hex') }),
+    });
+    const verified = await verify(json);
+    assert.equal(verified.status, 200);
+    assert.deepEqual((await verified.json()).totals, backup.totals);
+    assert.equal((await verify(json + ' ')).status, 404);
     await sessions.logout(actors.mon.sessionId, actors.mon.csrfToken);
     await call('mon', '/meus-fretes', undefined, 'GET', 401);
   } finally { await new Promise<void>(r => server.close(() => r())); }
