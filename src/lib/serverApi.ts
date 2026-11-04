@@ -110,6 +110,7 @@ export async function apiFetchSession(): Promise<{
     credentials: 'include',
     headers,
   });
+  if (cloudAuth && !res.ok && ![401, 403].includes(res.status)) throw Error('Não foi possível verificar a sessão no servidor.');
   const data = await res.json();
   if (res.ok && data.authenticated && data.csrfToken && data.sessionId) {
     setAuthTokens(data.csrfToken, data.sessionId);
@@ -1334,6 +1335,7 @@ export async function apiFetchFreightNotifications(): Promise<{
     targetId: string;
   }>;
   unreadCount: number;
+  unavailable?: boolean;
 }> {
   try {
     const res = await fetch('/api/meus-fretes/notifications', {
@@ -1341,10 +1343,10 @@ export async function apiFetchFreightNotifications(): Promise<{
       credentials: 'include',
       headers: getAuthHeaders(),
     });
-    if (!res.ok) return { notifications: [], unreadCount: 0 };
+    if (!res.ok) return { notifications: [], unreadCount: 0, unavailable: true };
     return await res.json();
   } catch {
-    return { notifications: [], unreadCount: 0 };
+    return { notifications: [], unreadCount: 0, unavailable: true };
   }
 }
 

@@ -679,7 +679,9 @@ export default function App() {
       // Also poll server freight notifications for current user
       try {
         const fNotifs = await apiFetchFreightNotifications();
-        if (fNotifs.notifications && fNotifs.notifications.length > 0) {
+        if (CLOUD_MODE && !fNotifs.unavailable) {
+          setNotifications(prev => [...prev.filter(n => !n.id.startsWith('fnotif-')), ...fNotifs.notifications]);
+        } else if (fNotifs.notifications && fNotifs.notifications.length > 0) {
           setNotifications((prev) => {
             const map = new Map(prev.map((n) => [n.id, n]));
             for (const fn of fNotifs.notifications) {
@@ -1248,6 +1250,14 @@ export default function App() {
     setShowNotificationsPopover(false);setShowNotificationsCenterModal(false);
   };
   const handleDeleteNotification = async (notifId: string) => {
+    if (CLOUD_MODE && notifId.startsWith('fnotif-')) {
+      try {
+        const response = await fetch('/api/meus-fretes/notifications/' + encodeURIComponent(notifId), { method: 'DELETE', headers: getAuthHeaders() });
+        if (!response.ok) throw Error('Não foi possível dispensar este aviso.');
+        setNotifications(prev => prev.filter(n => n.id !== notifId));
+      } catch { setNotificationNavigationError('Não foi possível dispensar este aviso.'); }
+      return;
+    }
     if(notifId.startsWith('mural:')){const response=await fetch('/api/mural/notifications/read',{method:'POST',headers:getAuthHeaders(),body:JSON.stringify({ids:[notifId],dismiss:true})});if(!response.ok)return;}
     setNotifications((prev) => prev.filter((n) => n.id !== notifId));
     if (firebaseUser) {
