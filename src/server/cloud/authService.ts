@@ -69,12 +69,12 @@ export class CloudAuthService {
       throw Object.assign(invalid(), { remainingAttempts: Math.max(0, 5 - attempt.count), locked: attempt.count >= 5,
         blockedUntil: attempt.blockedUntil || null, remainingSeconds: attempt.count >= 5 ? 120 : 0 });
     }
-    const { user } = await loadCloudIdentity(this.runtime, token.uid);
+    const { user, accessRevokedAt } = await loadCloudIdentity(this.runtime, token.uid);
     const sessionId = crypto.randomBytes(32).toString('hex'), csrfToken = crypto.randomBytes(24).toString('hex');
     const now = Date.now(), expiresAt = now + (input.rememberMe ? 14 : 1) * 86400000;
     const batch = this.runtime.db.batch();
     batch.set(this.runtime.db.collection('auth_sessions').doc(digest(sessionId)), {
-      uid: token.uid, csrfToken, authTime: token.auth_time, createdAt: now, expiresAt,
+      uid: token.uid, csrfToken, authTime: token.auth_time, accessRevokedAt, createdAt: now, expiresAt,
     });
     batch.set(attempt.ref, { count: 0, blockedUntil: 0, windowStartedAt: now });
     batch.create(this.runtime.db.collection('audit_logs').doc(), { actorId: token.uid, action: 'AUTH_LOGIN', atIso: new Date(now).toISOString() });
@@ -99,7 +99,8 @@ export class CloudAuthService {
       }
       throw cause;
     }
-    const { user, account } = identity;
+    const { user, account, accessRevokedAt } = identity;
+    if (Number(saved.accessRevokedAt || 0) !== accessRevokedAt) throw error('Sessão revogada. Entre novamente.', 401, 'SESSION_REVOKED');
     if (saved.authTime < Math.floor(Date.parse(account.tokensValidAfterTime || '1970-01-01T00:00:00Z') / 1000)) throw error('Sessão revogada.', 401, 'SESSION_REVOKED');
     const config = (await this.runtime.db.collection('system_settings').doc('portal').get()).data()?.config;
     return { authenticated: true, user, sessionId, csrfToken: saved.csrfToken, expiresAt: saved.expiresAt, ...(config ? { systemConfig: config } : {}) };

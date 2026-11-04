@@ -29,6 +29,41 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
   assert.equal(changed.user.mustChangePassword, false);
   await assert.rejects(service.session(session.sessionId), { status: 401 });
   assert.equal((await new CloudAuthService(runtime, async () => { throw Error(); }).session(changed.sessionId)).user.id, uid);
+
+  const staffUid = 'access-lifecycle-test', email = staffUid + '@example.test';
+  await runtime.auth.createUser({ uid: staffUid, email, password });
+  await runtime.db.collection('users').doc(staffUid).set({ active: true, approvalStatus: 'APROVADO', accessLevel: 'FUNCIONARIO', accessProfile: 'RH' });
+  await runtime.db.collection('employee_profiles').doc(staffUid).set({ name: 'TESTE colaborador', department: 'Recursos Humanos', roleTitle: 'RH' });
+  await runtime.db.collection('auth_identifiers').doc(privateIdentifierKey(email)).set({ uid: staffUid, email });
+  const old = await service.login({ identifier: email, password });
+  const server = createCloudApi(runtime, { passwordVerifier: firebasePasswordVerifier({ projectId: input.projectId, apiKey: 'emulator-only', emulator: true }) }).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = 'http://127.0.0.1:' + (server.address() as { port: number }).port + '/api/cloud/admin';
+  const decide = (target: string, action: string, authSession = changed) => fetch(base + '/access-requests/' + target + '/decision', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Rodovar-Session': authSession.sessionId, 'X-CSRF-Token': authSession.csrfToken },
+    body: JSON.stringify({ action, accessLevel: 'ADMINISTRADOR', reason: 'TESTE de homologação' }),
+  });
+  try {
+    assert.equal((await decide(staffUid, 'SUSPENDER', old)).status, 403);
+    assert.equal((await decide(uid, 'SUSPENDER')).status, 403);
+    assert.equal((await decide(staffUid, 'SUSPENDER')).status, 200);
+    assert.equal((await decide(staffUid, 'APROVAR')).status, 200);
+    await assert.rejects(service.session(old.sessionId), { code: 'SESSION_REVOKED' });
+    const fresh = await service.login({ identifier: email, password });
+    assert.equal(fresh.user.accessLevel, 'FUNCIONARIO');
+    assert.equal(fresh.user.accessProfile, 'RH');
+    const headers = { 'X-Rodovar-Session': changed.sessionId, 'X-CSRF-Token': changed.csrfToken };
+    assert.equal((await fetch(base + '/users/' + uid, { method: 'DELETE', headers })).status, 403);
+    for (let i = 0; i < 2; i++) assert.equal((await fetch(base + '/users/' + staffUid, { method: 'DELETE', headers })).status, 200);
+    const listing = await (await fetch(base + '/access-requests', { headers })).json();
+    assert.ok(!listing.accounts.some((person: { id: string }) => person.id === staffUid));
+    assert.equal(listing.decisionsHistory.filter((record: { targetUserId: string }) => record.targetUserId === staffUid).length, 3);
+    assert.ok((await runtime.db.collection('employee_profiles').doc(staffUid).get()).exists);
+    assert.equal((await decide(staffUid, 'APROVAR')).status, 409);
+    await assert.rejects(service.session(fresh.sessionId), { status: 403 });
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });
 
 test('Chat Firestore: dois clientes, isolamento, reenvio, concorrência, leitura e revogação', async () => {

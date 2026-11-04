@@ -61,7 +61,12 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     if (!match) { res.status(401).json({ error: 'Entre para acessar.', code: 'AUTH_REQUIRED' }); return; }
     try {
       const token = await auth.verifyIdToken(match[1], true);
-      req.sessionUser = (await loadCloudIdentity(runtime, token.uid)).user;
+      const identity = await loadCloudIdentity(runtime, token.uid);
+      if (identity.accessRevokedAt && token.auth_time <= Math.floor(identity.accessRevokedAt / 1000)) {
+        res.status(401).json({ error: 'Sessão revogada. Entre novamente.', code: 'SESSION_REVOKED' });
+        return;
+      }
+      req.sessionUser = identity.user;
       if (req.sessionUser.mustChangePassword) { res.status(403).json({ error: 'Troque sua senha antes de continuar.', code: 'PASSWORD_CHANGE_REQUIRED' }); return; }
       next();
     } catch (error: any) {

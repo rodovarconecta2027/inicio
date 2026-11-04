@@ -33,6 +33,7 @@ import {
   resolveAvatarUrl,
   apiDeleteUser,
 } from '../lib/serverApi';
+import { CLOUD_MODE } from '../lib/apiTransport';
 import { CorporateModal } from './ui/CorporateModal';
 
 interface AccessReleaseTabProps {
@@ -423,7 +424,7 @@ export const AccessReleaseTab: React.FC<AccessReleaseTabProps> = ({
                         <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
                           {!isSelf && !isLastActiveAdmin && <button type="button" aria-label={`Excluir cadastro de ${acc.name}`} onClick={() => {setDeleteTarget(acc);setDeleteError('');}} className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700 hover:bg-red-100"><Trash2 className="h-3.5 w-3.5" />Excluir cadastro</button>}
                           {/* Permitir acesso */}
-                          {status !== 'APROVADO' && (
+                          {(CLOUD_MODE ? acc.reactivationAllowed : status !== 'APROVADO') && (
                             <button
                               type="button"
                               disabled={isSelf}
@@ -440,12 +441,12 @@ export const AccessReleaseTab: React.FC<AccessReleaseTabProps> = ({
                               }`}
                             >
                               <UserCheck className="w-3.5 h-3.5" />
-                              <span>Permitir acesso</span>
+                              <span>{CLOUD_MODE ? 'Reativar acesso' : 'Permitir acesso'}</span>
                             </button>
                           )}
 
                           {/* Configurar Permissões (para contas já aprovadas) */}
-                          {status === 'APROVADO' && (
+                          {!CLOUD_MODE && status === 'APROVADO' && (
                             <button
                               type="button"
                               onClick={() => openDecisionModal(acc, 'ALTERAR_PERMISSOES')}
@@ -605,8 +606,8 @@ export const AccessReleaseTab: React.FC<AccessReleaseTabProps> = ({
             </div>
 
             <div className="py-4 space-y-3.5 overflow-y-auto flex-1 pr-1">
-              {(decisionModal.action === 'APROVAR' ||
-                decisionModal.action === 'ALTERAR_PERMISSOES') && (
+              {(!CLOUD_MODE && (decisionModal.action === 'APROVAR' ||
+                decisionModal.action === 'ALTERAR_PERMISSOES')) && (
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>

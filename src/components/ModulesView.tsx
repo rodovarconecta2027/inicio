@@ -4823,7 +4823,7 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
     const readRate =
       totalPossibleReads > 0 ? Math.round((totalReads / totalPossibleReads) * 100) : 100;
 
-    if (!isStrictAdmin || currentUser.id !== 'emp-admin-master') return <div role="alert">Acesso restrito ao administrador principal.</div>;
+    if (!isStrictAdmin || (!CLOUD_MODE && currentUser.id !== 'emp-admin-master')) return <div role="alert">Acesso restrito ao administrador principal.</div>;
     const openArea = (area: AdminArea, audit=false) => {
       setMasterArea(area);
       setAdminSubTab(area==='system'?'configuracao_sistema':area==='users'||area==='permissions'?'liberacao_uso':'visao_geral');
@@ -7273,7 +7273,7 @@ function AdministrationDataBoundary(props:ModulesViewProps){
   const [error,setError]=useState('');
   const [loading,setLoading]=useState(true);
   useEffect(()=>{
-    if(props.currentUser.accessLevel!=='ADMINISTRADOR'||props.currentUser.id!=='emp-admin-master'){setLoading(false);return;}
+    if(props.currentUser.accessLevel!=='ADMINISTRADOR'||(!CLOUD_MODE&&props.currentUser.id!=='emp-admin-master')){setLoading(false);return;}
     const controller=new AbortController();
     const load=async()=>{
       const endpoints=['/api/admin/access-requests','/api/mural','/api/requests','/api/agenda'];

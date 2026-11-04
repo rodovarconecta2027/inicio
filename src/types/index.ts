@@ -42,6 +42,7 @@ export interface Employee {
   avatar: string;
   hasCustomAvatar?: boolean;
   approvalStatus?: AccountApprovalStatus;
+  reactivationAllowed?: boolean;
   requestedAt?: string;
   approvedBy?: string;
   approvedAt?: string;

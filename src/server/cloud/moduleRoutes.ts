@@ -44,26 +44,83 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
       })) });
     } catch (error) { next(error); }
   });
-  app.get('/api/cloud/admin/access-requests', guard, adminGuard, async (_req, res, next) => {
+  app.get('/api/cloud/admin/access-requests', guard, adminGuard, async (req: any, res, next) => {
     try {
-      const [users, audit] = await Promise.all([
+      const [users, audit, decisions] = await Promise.all([
         cloudDirectory(db),
         db.collection('audit_logs').orderBy('atIso', 'desc').limit(150).get(),
+        db.collection('access_decisions').orderBy('timestampIso', 'desc').limit(100).get(),
       ]);
-      const accounts = users.map((user: any) => ({
-        id: user.id, name: user.name, login: user.login || '', email: user.email || '',
+      const accounts = users.filter((user: any) => !user.removedAtIso).map((user: any) => ({
+        id: user.id, name: user.name, login: user.login || '', email: user.id === req.sessionUser.id ? req.sessionUser.email : user.email || '',
         department: user.department, roleTitle: user.roleTitle, phoneExt: user.phoneExt || '',
         active: user.active, approvalStatus: user.approvalStatus, accessLevel: user.accessLevel,
         accessProfile: user.accessProfile, permissoesPaginas: user.permissoesPaginas || [],
-        mustChangePassword: user.mustChangePassword === true,
+        mustChangePassword: user.mustChangePassword === true, reactivationAllowed: user.reactivationAllowed === true,
       }));
       const auditLogs = audit.docs.map(doc => {
         const { action, actorId, atIso } = doc.data();
         return { id: doc.id, action, actorUserId: actorId || '', atIso };
       });
-      res.json({ accounts, pendingCount: accounts.filter((user: { approvalStatus: string }) => user.approvalStatus === 'PENDENTE').length, decisionsHistory: [], auditLogs });
+      res.json({ accounts, pendingCount: accounts.filter((user: { approvalStatus: string }) => user.approvalStatus === 'PENDENTE').length, decisionsHistory: decisions.docs.map(doc => doc.data()), auditLogs });
     } catch (error) { next(error); }
   });
+
+  const accountAction = (forcedAction?: 'EXCLUIR'): RequestHandler => async (req: any, res, next) => {
+    try {
+      const targetId = req.params.userId;
+      const action = forcedAction ?? req.body?.action;
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(targetId)) fail('Conta inválida.', 400);
+      if (!['APROVAR', 'SUSPENDER', 'RECUSAR', 'EXCLUIR'].includes(action)) {
+        fail('Vínculos e perfis precisam passar pelo provisionamento controlado.', 409);
+      }
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+      const result = await db.runTransaction(async tx => {
+        const security = db.collection('system_settings').doc('security');
+        const actorRef = db.collection('users').doc(req.sessionUser.id);
+        const targetRef = db.collection('users').doc(targetId);
+        const profileRef = db.collection('employee_profiles').doc(targetId);
+        const [policy, actor, target, profile] = await tx.getAll(security, actorRef, targetRef, profileRef);
+        const admin = actor.data(), account = target.data(), person = profile.data();
+        if (policy.data()?.protectedAdminUid !== actor.id || !admin?.active || admin.approvalStatus !== 'APROVADO' || admin.accessLevel !== 'ADMINISTRADOR') {
+          fail('Operação exclusiva do administrador principal.', 403);
+        }
+        if (targetId === actor.id || account?.accessLevel === 'ADMINISTRADOR') fail('O administrador principal é protegido.', 403);
+        if (!account || !person) return fail('Conta não encontrada.', 404);
+        if (account.removedAtIso) {
+          if (action === 'EXCLUIR') return { ok: true };
+          return fail('Cadastro excluído. O histórico foi preservado.', 409);
+        }
+        const reactivate = action === 'APROVAR';
+        if (reactivate && !(account.approvalStatus === 'SUSPENSO' && account.reactivationAllowed === true)) {
+          fail('Só é possível reativar um vínculo aprovado e suspenso nesta central.', 409);
+        }
+        const newStatus = reactivate ? 'APROVADO' : action === 'RECUSAR' ? 'RECUSADO' : 'SUSPENSO';
+        if (!reactivate && action !== 'EXCLUIR' && !account.active && account.approvalStatus === newStatus) return { ok: true };
+        const now = Date.now(), timestampIso = new Date(now).toISOString();
+        const decisionRef = db.collection('access_decisions').doc();
+        const decision = {
+          id: decisionRef.id, action, newStatus, targetUserId: targetId,
+          targetName: person.name, targetLogin: person.login || '',
+          adminId: actor.id, adminName: req.sessionUser.name,
+          accessLevel: account.accessLevel, permissoesPaginas: account.permissoesPaginas || [],
+          reason, timestampIso, timestampFormatted: new Date(now).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        };
+        const reactivationAllowed = action === 'SUSPENDER' && account.active && account.approvalStatus === 'APROVADO';
+        tx.update(targetRef, {
+          active: reactivate, approvalStatus: newStatus, reactivationAllowed,
+          ...(reactivate ? {} : { accessRevokedAt: Math.max(now, Number(account.accessRevokedAt || 0) + 1) }),
+          ...(action === 'EXCLUIR' ? { removedAtIso: timestampIso } : {}),
+        });
+        tx.create(decisionRef, decision);
+        tx.create(db.collection('audit_logs').doc(), { actorId: actor.id, targetId, action: 'DECISAO_LIBERACAO_USO_' + action, atIso: timestampIso });
+        return { ok: true, decision };
+      });
+      res.json(result);
+    } catch (error) { next(error); }
+  };
+  app.post('/api/cloud/admin/access-requests/:userId/decision', guard, adminGuard, accountAction());
+  app.delete('/api/cloud/admin/users/:userId', guard, adminGuard, accountAction('EXCLUIR'));
 
   const modules = [
     { name: 'rh-external', page: 'solicitacoes', initial: () => ({ clients: [], services: [], requests: [], keys: {}, events: {} }), mount: (r: any, s: any) => registerExternalRh(r, guard, undefined, s) },
