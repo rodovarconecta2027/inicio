@@ -2,6 +2,7 @@ import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import {CorporateModal} from './ui/CorporateModal';
 import {DriverCenter} from './DriverCenter';
 import {getAuthHeaders} from '../lib/serverApi';
+import { BrandingBackups, downloadBrandingBackup } from './BrandingBackups';
 import {validatePortalBackup,backupEmployees} from '../lib/adminBackup';
 import {AdministrationMaster, type AdminArea} from './AdministrationMaster';
 import {AgendaPremium} from './AgendaPremium';
@@ -1409,7 +1410,16 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
   };
 
   // Fase 8: Export Full Governance & Compliance JSON Snapshot
-  const handleExportGovernanceJsonSnapshot = () => {
+  const handleExportGovernanceJsonSnapshot = async () => {
+    if (CLOUD_MODE) {
+      try {
+        const revision = await downloadBrandingBackup();
+        setExportReportToast('Backup da identidade visual exportado. Revisão ' + revision + '.');
+      } catch (error) {
+        setExportReportToast(error instanceof Error ? error.message : 'Não foi possível exportar o backup.');
+      }
+      return;
+    }
     const filename = `rodovar-conecta-backup-governanca-${new Date().toISOString().slice(0, 10)}.json`;
     const snapshot = {
       platform: 'RODOVAR CONECTA Enterprise v2.0',
@@ -4837,7 +4847,7 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
         onExport={kind=>{if(kind==='reads')handleExportCorporateCsvReport('leituras');else if(kind==='requests')handleExportCorporateCsvReport('sla_solicitacoes');else if(kind==='compliance')handleExportEmployeeComplianceMatrixCsv();else handleExportGovernanceJsonSnapshot();}} />
       <CorporateModal isOpen={showDriverCenter} onClose={()=>setShowDriverCenter(false)} title="Gestão de Motoristas" maxWidth="6xl"><DriverCenter admin/></CorporateModal>
       <section id="am-workspace" className="am-workspace" aria-label="Funcionalidades da Administração">
-        <div className="am-workspace-heading"><div><h2>{({users:'Usuários & Acessos',system:'Sistema',permissions:'Permissões',reports:'Relatórios e Auditoria',backups:'Backups e Restauração'})[masterArea]}</h2><p>{masterArea==='permissions'?'Selecione uma conta e utilize a ação Alterar Permissões.':masterArea==='backups'?'Exportação e restauração do estado local do portal.':'Recursos existentes, permissões e histórico preservados.'}</p></div></div>
+        <div className="am-workspace-heading"><div><h2>{({users:'Usuários & Acessos',system:'Sistema',permissions:'Permissões',reports:'Relatórios e Auditoria',backups:'Backups e Restauração'})[masterArea]}</h2><p>{masterArea==='permissions'?'Selecione uma conta e utilize a ação Alterar Permissões.':masterArea==='backups'?(CLOUD_MODE ? 'Backup e restauração da identidade visual da homologação.' : 'Exportação e restauração do estado local do portal.'):'Recursos existentes, permissões e histórico preservados.'}</p></div></div>
         {isStrictAdmin && (masterArea === 'users' || masterArea === 'permissions') && (
           <AccessReleaseTab
             currentUser={currentUser}
@@ -4857,7 +4867,8 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
           />
         )}
 
-{masterArea==='backups'&&<><p className="am-permission-note">Este backup contém os dados carregados pelo portal. Não inclui arquivos armazenados no servidor, sessões, credenciais de autenticação ou bases locais independentes.</p>          {/* Barra de Backup Integral (.JSON), Importação e Restauração de Dados */}
+{masterArea==='backups' && CLOUD_MODE && <BrandingBackups onRestore={onSystemConfigPublished} />}
+{masterArea==='backups'&&!CLOUD_MODE&&<><p className="am-permission-note">Este backup contém os dados carregados pelo portal. Não inclui arquivos armazenados no servidor, sessões, credenciais de autenticação ou bases locais independentes.</p>          {/* Barra de Backup Integral (.JSON), Importação e Restauração de Dados */}
           <div className="am-backup-panel flex flex-col gap-5">
             <div className="text-xs text-gray-300">
               <span className="font-extrabold text-[#FFD400]">

@@ -63,6 +63,36 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
     assert.equal(newSession.systemConfig?.topHeader.focusX, 67);
     assert.equal((await runtime.db.collection('audit_logs').where('action', '==', 'SYSTEM_CONFIG_PUBLISHED').get()).size, 1);
 
+    const backupRequest = (action: string, body?: object, authSession = changed) => fetch(base + '/backups/branding/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Rodovar-Session': authSession.sessionId, 'X-CSRF-Token': authSession.csrfToken },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    assert.equal((await backupRequest('export', undefined, old)).status, 403);
+    const exported = await backupRequest('export');
+    assert.equal(exported.status, 200);
+    const backup = await exported.json();
+    assert.equal(backup.config.revision, version.revision);
+    assert.deepEqual(Object.keys(backup).sort(), ['config', 'format', 'schemaVersion']);
+    const changedDraft = { ...draft, baseRevision: version.revision, topHeader: { ...draft.topHeader, focusX: 24 } };
+    assert.equal((await publish(changedDraft)).status, 200);
+    const tampered = { ...backup, config: { ...backup.config, topHeader: { ...backup.config.topHeader, focusX: 91 } } };
+    assert.equal((await backupRequest('validate', { backup: tampered })).status, 400);
+    const validation = await backupRequest('validate', { backup });
+    assert.equal(validation.status, 200);
+    const { currentRevision } = await validation.json();
+    assert.equal(currentRevision, version.revision + 1);
+    assert.equal((await backupRequest('restore', { backup, baseRevision: currentRevision })).status, 400);
+    assert.equal((await backupRequest('restore', { backup, baseRevision: version.revision, confirm: true })).status, 409);
+    const restoration = await backupRequest('restore', { backup, baseRevision: currentRevision, confirm: true });
+    assert.equal(restoration.status, 200);
+    const restored = await restoration.json();
+    assert.equal(restored.config.revision, currentRevision + 1);
+    assert.equal(restored.config.topHeader.focusX, 67);
+    assert.equal((await service.session(changed.sessionId)).user.id, uid);
+    assert.equal((await runtime.db.collection('branding_revisions').doc(String(currentRevision)).get()).data()?.topHeader.focusX, 24);
+    assert.equal((await runtime.db.collection('audit_logs').where('action', '==', 'BRANDING_BACKUP_RESTORED').get()).size, 1);
+
     assert.equal((await decide(staffUid, 'SUSPENDER', old)).status, 403);
     assert.equal((await decide(uid, 'SUSPENDER')).status, 403);
     assert.equal((await decide(staffUid, 'SUSPENDER')).status, 200);

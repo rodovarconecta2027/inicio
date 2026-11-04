@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from 'express';
-import type { Firestore } from 'firebase-admin/firestore';
+import { isDeepStrictEqual } from 'node:util';
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { brandingAvatars, brandingImages } from '../../lib/brandingAssets.js';
 import type { SystemConfig } from '../../types';
 export function getDefaultSystemConfig(): SystemConfig {
@@ -86,53 +87,90 @@ function positioned(asset: any) {
   };
 }
 
+type BrandingBackup = {
+  format: 'rodovar-homologation-branding';
+  schemaVersion: 1;
+  config: SystemConfig;
+};
+
+type Actor = { id: string; accessLevel: string };
+function actorOf(req: unknown): Actor {
+  return (req as { sessionUser: Actor }).sessionUser;
+}
+
+function requireAdmin() {
+  return Object.assign(new Error('Operação exclusiva do administrador principal.'), { status: 403 });
+}
+
+async function requireProtectedAdmin(tx: Transaction, db: Firestore, actor: Actor) {
+  const [security, user] = await tx.getAll(
+    db.collection('system_settings').doc('security'), db.collection('users').doc(actor.id),
+  );
+  const account = user.data();
+  if (security.data()?.protectedAdminUid !== actor.id || !account?.active ||
+      account.approvalStatus !== 'APROVADO' || account.accessLevel !== 'ADMINISTRADOR') throw requireAdmin();
+}
+
+function validateDraft({ sidebarPoster, topHeader, defaultAvatar, welcomeBanner }: Record<string, any>) {
+  const items = welcomeBanner?.items;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 5) invalid('O carrossel deve conter de 1 a 5 imagens.');
+  const ids = new Set<string>();
+  return {
+    sidebarPoster: positioned(sidebarPoster),
+    topHeader: positioned(topHeader),
+    defaultAvatar: { imageUrl: image(defaultAvatar?.imageUrl, brandingAvatars), ...dimensions(defaultAvatar) },
+    welcomeBanner: {
+      carouselEnabled: welcomeBanner.carouselEnabled === true && items.length > 1,
+      intervalSeconds: Math.round(bounded(welcomeBanner.intervalSeconds, 3, 15, 5)),
+      items: items.map(item => {
+        if (typeof item?.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(item.id) || ids.has(item.id)) {
+          return invalid('As imagens do carrossel precisam de identificadores únicos.');
+        }
+        ids.add(item.id);
+        const altText = typeof item.altText === 'string' ? item.altText.trim().slice(0, 200) : '';
+        if (item.isDecorative !== true && !altText) invalid('Informe a descrição das imagens não decorativas.');
+        return { id: item.id, ...positioned(item), altText, isDecorative: item.isDecorative === true };
+      }),
+    },
+  };
+}
+
+function readBackup(input: unknown): BrandingBackup {
+  const backup = input as Partial<BrandingBackup> | null;
+  if (backup?.format !== 'rodovar-homologation-branding' || backup.schemaVersion !== 1 ||
+      !backup.config || !Number.isSafeInteger(backup.config.revision) || backup.config.revision < 1) {
+    return invalid('Selecione um backup de identidade visual exportado pela homologação.');
+  }
+  validateDraft({ ...backup.config });
+  return backup as BrandingBackup;
+}
+
 export function registerCloudBrandingWrites(app: Express, guard: RequestHandler, db: Firestore) {
   app.post('/api/cloud/system-config/publish', guard, async (req, res, next) => {
     try {
-      const actor = (req as typeof req & { sessionUser: { id: string; accessLevel: string } }).sessionUser;
+      const actor = actorOf(req);
       if (actor.accessLevel !== 'ADMINISTRADOR') {
         res.status(403).json({ error: 'Publicação exclusiva do administrador principal.' });
         return;
       }
       const { baseRevision, sidebarPoster, topHeader, defaultAvatar, welcomeBanner } = req.body || {};
       if (!Number.isSafeInteger(baseRevision) || baseRevision < 1) invalid('Atualize a revisão antes de publicar.');
-      const items = welcomeBanner?.items;
-      if (!Array.isArray(items) || items.length < 1 || items.length > 5) invalid('O carrossel deve conter de 1 a 5 imagens.');
-      const ids = new Set<string>();
-      const draft = {
-        sidebarPoster: positioned(sidebarPoster),
-        topHeader: positioned(topHeader),
-        defaultAvatar: { imageUrl: image(defaultAvatar?.imageUrl, brandingAvatars), ...dimensions(defaultAvatar) },
-        welcomeBanner: {
-          carouselEnabled: welcomeBanner.carouselEnabled === true && items.length > 1,
-          intervalSeconds: Math.round(bounded(welcomeBanner.intervalSeconds, 3, 15, 5)),
-          items: items.map(item => {
-            if (typeof item?.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(item.id) || ids.has(item.id)) {
-              return invalid('As imagens do carrossel precisam de identificadores únicos.');
-            }
-            ids.add(item.id);
-            const altText = typeof item.altText === 'string' ? item.altText.trim().slice(0, 200) : '';
-            if (item.isDecorative !== true && !altText) invalid('Informe a descrição das imagens não decorativas.');
-            return { id: item.id, ...positioned(item), altText, isDecorative: item.isDecorative === true };
-          }),
-        },
-      };
+      const draft = validateDraft({ sidebarPoster, topHeader, defaultAvatar, welcomeBanner });
       const ref = db.collection('system_settings').doc('branding');
       const result = await db.runTransaction(async tx => {
-        const [stored, security, user] = await tx.getAll(
-          ref, db.collection('system_settings').doc('security'), db.collection('users').doc(actor.id),
-        );
-        const account = user.data();
-        if (security.data()?.protectedAdminUid !== actor.id || !account?.active ||
-            account.approvalStatus !== 'APROVADO' || account.accessLevel !== 'ADMINISTRADOR') {
-          throw Object.assign(new Error('Publicação exclusiva do administrador principal.'), { status: 403 });
-        }
+        await requireProtectedAdmin(tx, db, actor);
+        const stored = await tx.get(ref);
         const current = stored.exists ? stored.data() as SystemConfig : getDefaultSystemConfig();
         if (current.revision !== baseRevision) return { published: false as const, current };
         const config: SystemConfig = {
           ...draft, revision: baseRevision + 1, updatedAtIso: new Date().toISOString(),
           updatedBy: 'Administração RODOVAR',
         };
+        const archive = db.collection('branding_revisions');
+        const previousRef = archive.doc(String(current.revision));
+        const previous = await tx.get(previousRef);
+        if (!previous.exists) tx.create(previousRef, current);
+        tx.create(archive.doc(String(config.revision)), config);
         tx.set(ref, config);
         tx.create(db.collection('audit_logs').doc(), {
           actorId: actor.id, action: 'SYSTEM_CONFIG_PUBLISHED', atIso: config.updatedAtIso, revision: config.revision,
@@ -147,6 +185,69 @@ export function registerCloudBrandingWrites(app: Express, guard: RequestHandler,
         return;
       }
       res.json({ ok: true, systemConfig: result.config });
+    } catch (error) { next(error); }
+  });
+
+  app.post('/api/cloud/admin/backups/branding/export', guard, async (req, res, next) => {
+    try {
+      const actor = actorOf(req);
+      if (actor.accessLevel !== 'ADMINISTRADOR') throw requireAdmin();
+      const config = await db.runTransaction(async tx => {
+        await requireProtectedAdmin(tx, db, actor);
+        const stored = await tx.get(db.collection('system_settings').doc('branding'));
+        const current = stored.exists ? stored.data() as SystemConfig : getDefaultSystemConfig();
+        const ref = db.collection('branding_revisions').doc(String(current.revision));
+        const snapshot = await tx.get(ref);
+        if (!snapshot.exists) tx.create(ref, current);
+        tx.create(db.collection('audit_logs').doc(), {
+          actorId: actor.id, action: 'BRANDING_BACKUP_EXPORTED', revision: current.revision, atIso: new Date().toISOString(),
+        });
+        return snapshot.exists ? snapshot.data() as SystemConfig : current;
+      });
+      const backup: BrandingBackup = { format: 'rodovar-homologation-branding', schemaVersion: 1, config };
+      res.json(backup);
+    } catch (error) { next(error); }
+  });
+
+  app.post('/api/cloud/admin/backups/branding/:operation(validate|restore)', guard, async (req, res, next) => {
+    try {
+      const actor = actorOf(req);
+      if (actor.accessLevel !== 'ADMINISTRADOR') throw requireAdmin();
+      const backup = readBackup(req.body?.backup);
+      const restore = req.params.operation === 'restore';
+      const ref = db.collection('system_settings').doc('branding');
+      const revisions = db.collection('branding_revisions');
+      const result = await db.runTransaction(async tx => {
+        await requireProtectedAdmin(tx, db, actor);
+        const [stored, original] = await tx.getAll(ref, revisions.doc(String(backup.config.revision)));
+        if (!original.exists || !isDeepStrictEqual(original.data(), backup.config)) {
+          return invalid('O arquivo não corresponde a uma revisão arquivada nesta homologação.');
+        }
+        const current = stored.exists ? stored.data() as SystemConfig : getDefaultSystemConfig();
+        if (!restore) return { ok: true, currentRevision: current.revision, config: backup.config };
+        if (req.body.confirm !== true) return invalid('Confirme a restauração após revisar o arquivo.');
+        if (req.body.baseRevision !== current.revision) {
+          throw Object.assign(new Error('A revisão ativa mudou. Valide o arquivo novamente.'), { status: 409, code: 'REVISION_CONFLICT' });
+        }
+        if (backup.config.revision === current.revision) {
+          return invalid('A configuração do backup já é a revisão ativa.');
+        }
+        const currentRef = revisions.doc(String(current.revision));
+        const archived = await tx.get(currentRef);
+        const config: SystemConfig = {
+          ...validateDraft({ ...backup.config }), revision: current.revision + 1,
+          updatedBy: 'Administração RODOVAR', updatedAtIso: new Date().toISOString(),
+        };
+        if (!archived.exists) tx.create(currentRef, current);
+        tx.create(revisions.doc(String(config.revision)), config);
+        tx.set(ref, config);
+        tx.create(db.collection('audit_logs').doc(), {
+          actorId: actor.id, action: 'BRANDING_BACKUP_RESTORED', atIso: config.updatedAtIso,
+          sourceRevision: backup.config.revision, revision: config.revision,
+        });
+        return { ok: true, currentRevision: config.revision, config };
+      });
+      res.json(result);
     } catch (error) { next(error); }
   });
 }
