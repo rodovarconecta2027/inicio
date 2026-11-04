@@ -16,6 +16,7 @@ export async function loadCloudIdentity(runtime: { auth: Auth; db: Firestore }, 
   }
   return {
     account,
+    passwordChangeUntil: Number(user.passwordChangeUntil || 0),
     accessRevokedAt: Number(user.accessRevokedAt || 0),
     user: {
       id: uid, name: profile.name, email: account.email || '', login: profile.login || account.email || '',

@@ -11,6 +11,7 @@ import type { Employee } from '../../types';
 import { CloudAuthService, firebasePasswordVerifier } from './authService.js';
 import { registerCloudAuthRoutes, cloudSessionId } from './authRoutes.js';
 import { loadCloudIdentity } from './identity.js';
+import { registerCloudRoster } from './rosterRoutes.js';
 
 /** Separate migration surface. Does not replace or impersonate the local API. */
 export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: { passwordVerifier?: (email: string, password: string) => Promise<string> } = {}) {
@@ -69,6 +70,10 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     try {
       const token = await auth.verifyIdToken(match[1], true);
       const identity = await loadCloudIdentity(runtime, token.uid);
+      if (identity.passwordChangeUntil > Date.now()) {
+        res.status(409).json({ error: 'Aguarde a conclusão da troca de senha.', code: 'PASSWORD_CHANGE_IN_PROGRESS' });
+        return;
+      }
       if (identity.accessRevokedAt && token.auth_time <= Math.floor(identity.accessRevokedAt / 1000)) {
         res.status(401).json({ error: 'Sessão revogada. Entre novamente.', code: 'SESSION_REVOKED' });
         return;
@@ -90,6 +95,7 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   registerCloudChatRoutes(app, guard, new FirestoreChatService(db));
   registerCloudFreightRoutes(app, guard, db);
   registerCloudModuleRoutes(app, guard, db);
+  registerCloudRoster(app, guard, runtime);
   app.use('/api/cloud', guard, (req, res, next) => {
     if (/^\/(admin|pagamentos|drivers|rh-external|customer-covers|documents)(\/|$)/.test(req.path)) { res.status(503).json({ error: 'Este serviço ainda não foi migrado para a homologação remota. Nenhum dado foi alterado.', code: 'MODULE_NOT_MIGRATED' }); return; }
     next();

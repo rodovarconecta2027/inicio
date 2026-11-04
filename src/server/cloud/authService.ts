@@ -53,6 +53,10 @@ export class CloudAuthService {
       throw Object.assign(invalid(), { remainingAttempts: Math.max(0, 5 - attempt.count), locked: attempt.count >= 5,
         blockedUntil: attempt.blockedUntil || null, remainingSeconds: attempt.count >= 5 ? 120 : 0 });
     }
+    const accountRef = this.runtime.db.collection('users').doc(mapping.uid);
+    const before = (await accountRef.get()).data();
+    if (Number(before?.passwordChangeUntil || 0) > Date.now())
+      throw error('Aguarde a conclusão da troca de senha.', 409, 'PASSWORD_CHANGE_IN_PROGRESS');
     let token;
     try {
       const idToken = await this.verifyPassword(mapping.email, password);
@@ -73,13 +77,19 @@ export class CloudAuthService {
     const { user, accessRevokedAt } = await loadCloudIdentity(this.runtime, token.uid);
     const sessionId = crypto.randomBytes(32).toString('hex'), csrfToken = crypto.randomBytes(24).toString('hex');
     const now = Date.now(), expiresAt = now + (input.rememberMe ? 14 : 1) * 86400000;
-    const batch = this.runtime.db.batch();
-    batch.set(this.runtime.db.collection('auth_sessions').doc(digest(sessionId)), {
-      uid: token.uid, csrfToken, authTime: token.auth_time, accessRevokedAt, createdAt: now, expiresAt,
+    await this.runtime.db.runTransaction(async tx => {
+      const account = (await tx.get(accountRef)).data();
+      if (!account?.active || account.approvalStatus !== 'APROVADO' ||
+          Number(before?.accessRevokedAt || 0) !== accessRevokedAt ||
+          Number(account.accessRevokedAt || 0) !== accessRevokedAt ||
+          Number(account.passwordChangeUntil || 0) > Date.now())
+        throw error('A sessão mudou durante o acesso. Entre novamente.', 401, 'SESSION_REVOKED');
+      tx.set(this.runtime.db.collection('auth_sessions').doc(digest(sessionId)), {
+        uid: token.uid, csrfToken, authTime: token.auth_time, accessRevokedAt, createdAt: now, expiresAt,
+      });
+      tx.set(attempt.ref, { count: 0, blockedUntil: 0, windowStartedAt: now });
+      tx.create(this.runtime.db.collection('audit_logs').doc(), { actorId: token.uid, action: 'AUTH_LOGIN', atIso: new Date(now).toISOString() });
     });
-    batch.set(attempt.ref, { count: 0, blockedUntil: 0, windowStartedAt: now });
-    batch.create(this.runtime.db.collection('audit_logs').doc(), { actorId: token.uid, action: 'AUTH_LOGIN', atIso: new Date(now).toISOString() });
-    await batch.commit();
     const config = await loadBranding(this.runtime.db);
     return { ok: true, authenticated: true, user, sessionId, csrfToken, expiresAt, ...(config ? { systemConfig: config } : {}) };
   }
@@ -100,7 +110,8 @@ export class CloudAuthService {
       }
       throw cause;
     }
-    const { user, account, accessRevokedAt } = identity;
+    const { user, account, accessRevokedAt, passwordChangeUntil } = identity;
+    if (passwordChangeUntil > Date.now()) throw error('Aguarde a conclusão da troca de senha.', 409, 'PASSWORD_CHANGE_IN_PROGRESS');
     if (Number(saved.accessRevokedAt || 0) !== accessRevokedAt) throw error('Sessão revogada. Entre novamente.', 401, 'SESSION_REVOKED');
     if (saved.authTime < Math.floor(Date.parse(account.tokensValidAfterTime || '1970-01-01T00:00:00Z') / 1000)) throw error('Sessão revogada.', 401, 'SESSION_REVOKED');
     const config = await loadBranding(this.runtime.db);
@@ -132,26 +143,70 @@ export class CloudAuthService {
   }
 
   async firstPassword(sessionId: string, csrf: string, password: string) {
+    return this.changePassword(sessionId, csrf, password);
+  }
+
+  async changePassword(sessionId: string, csrf: string, password: unknown, currentPassword?: unknown) {
     const current = await this.session(sessionId);
     if (csrf !== current.csrfToken) throw error('Atualize a sessão.', 403, 'CSRF_INVALID');
-    const ref = this.runtime.db.collection('auth_sessions').doc(digest(sessionId));
-    const saved = (await ref.get()).data();
-    if (!current.user.mustChangePassword || !saved || saved.authTime * 1000 < Date.now() - 300000)
-      throw error('Entre novamente para definir a senha de primeiro acesso.', 403, 'REAUTH_REQUIRED');
+    const firstAccess = current.user.mustChangePassword;
+    const db = this.runtime.db, sessionRef = db.collection('auth_sessions').doc(digest(sessionId));
+    const saved = (await sessionRef.get()).data();
+    if (!saved || (firstAccess && saved.authTime * 1000 < Date.now() - 300000))
+      throw error('Entre novamente antes de trocar a senha.', 403, 'REAUTH_REQUIRED');
     if (typeof password !== 'string' || password.length < 12 || password.length > 128)
       throw error('Use uma senha pessoal com 12 a 128 caracteres.', 400, 'INVALID_PASSWORD');
-    let same = false;
-    try { await this.verifyPassword(current.user.email, password); same = true; }
-    catch (cause: any) { if (cause.status !== 401) throw cause; }
-    if (same) throw error('A nova senha deve ser diferente da inicial.', 400, 'PASSWORD_UNCHANGED');
-    // Invalidate corporate sessions before changing the Firebase credential.
-    const sessions = await this.runtime.db.collection('auth_sessions').where('uid', '==', current.user.id).get();
-    for (const doc of sessions.docs) await doc.ref.delete();
-    await this.runtime.auth.updateUser(current.user.id, { password });
-    await this.runtime.auth.revokeRefreshTokens(current.user.id);
-    await this.runtime.db.collection('users').doc(current.user.id).update({ mustChangePassword: false });
-    await this.runtime.db.collection('audit_logs').add({ actorId: current.user.id, action: 'FIRST_PASSWORD_CHANGED', atIso: new Date().toISOString() });
-    return this.login({ identifier: current.user.email, password });
+    if (firstAccess) {
+      let same = false;
+      try { await this.verifyPassword(current.user.email, password); same = true; }
+      catch (cause: any) { if (cause.status !== 401) throw cause; }
+      if (same) throw error('A nova senha deve ser diferente da inicial.', 400, 'PASSWORD_UNCHANGED');
+    } else {
+      if (typeof currentPassword !== 'string' || !currentPassword || currentPassword.length > 1024)
+        throw error('Informe a senha atual.', 400, 'CURRENT_PASSWORD_REQUIRED');
+      if (password === currentPassword) throw error('Escolha uma senha diferente da atual.', 400, 'PASSWORD_UNCHANGED');
+      const attempt = await this.reserveAttempt(privateIdentifierKey('password-change:' + current.user.id));
+      try {
+        const token = await this.verifyPassword(current.user.email, currentPassword);
+        if ((await this.runtime.auth.verifyIdToken(token, true)).uid !== current.user.id) throw invalid();
+      } catch (cause: any) {
+        if (cause.status === 503) throw cause;
+        throw error('A senha atual está incorreta.', 400, 'CURRENT_PASSWORD_INVALID');
+      }
+      await attempt.ref.delete();
+    }
+
+    const accountRef = db.collection('users').doc(current.user.id);
+    const operationId = crypto.randomUUID();
+    await db.runTransaction(async tx => {
+      const [accountDoc, sessionDoc] = await tx.getAll(accountRef, sessionRef);
+      const account = accountDoc.data();
+      if (!account?.active || account.approvalStatus !== 'APROVADO' || !sessionDoc.exists ||
+          Number(account.accessRevokedAt || 0) !== Number(saved.accessRevokedAt || 0))
+        throw error('Sessão revogada. Entre novamente.', 401, 'SESSION_REVOKED');
+      const now = Date.now();
+      tx.update(accountRef, { passwordChangeId: operationId, passwordChangeUntil: now + 120000,
+        accessRevokedAt: Math.max(now, Number(account.accessRevokedAt || 0) + 1) });
+      tx.delete(sessionRef);
+    });
+    try {
+      await this.runtime.auth.updateUser(current.user.id, { password });
+      await this.runtime.auth.revokeRefreshTokens(current.user.id);
+    } catch (cause) {
+      await db.runTransaction(async tx => {
+        if ((await tx.get(accountRef)).data()?.passwordChangeId === operationId)
+          tx.update(accountRef, { passwordChangeId: '', passwordChangeUntil: 0 });
+      });
+      throw cause;
+    }
+    await db.runTransaction(async tx => {
+      if ((await tx.get(accountRef)).data()?.passwordChangeId !== operationId)
+        throw error('Entre novamente com sua senha atual.', 409, 'PASSWORD_CHANGE_IN_PROGRESS');
+      tx.update(accountRef, { mustChangePassword: false, passwordChangeId: '', passwordChangeUntil: 0 });
+      tx.create(db.collection('audit_logs').doc(), { actorId: current.user.id,
+        action: firstAccess ? 'FIRST_PASSWORD_CHANGED' : 'PASSWORD_CHANGED', atIso: new Date().toISOString() });
+    });
+    return this.login({ identifier: current.user.email, password, rememberMe: saved.expiresAt - saved.createdAt > 86400000 });
   }
 }
 

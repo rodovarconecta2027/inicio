@@ -1,3 +1,5 @@
+import { CloudRoster } from './CloudRoster';
+import { CloudPasswordForm } from './CloudPasswordForm';
 import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
 import {CorporateModal} from './ui/CorporateModal';
 import {DriverCenter} from './DriverCenter';
@@ -305,6 +307,7 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
     return()=>cancelAnimationFrame(frame);
   },[adminScrollRequest,activeSection]);
   const [showDriverCenter,setShowDriverCenter]=useState(false);
+  const [rosterRevision, setRosterRevision] = useState(0);
   const [masterArea,setMasterArea]=useState<AdminArea>(()=>adminSubTab==='configuracao_sistema'?'system':'users');
   const [localPendingCount, setLocalPendingCount] = useState<number>(pendingAccessRequestsCount);
   const [profileErrorMsg, setProfileErrorMsg] = useState<string | null>(null);
@@ -4842,15 +4845,17 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
     };
     return (<div className="space-y-5 am-admin-page">
       <AdministrationMaster onDrivers={()=>setShowDriverCenter(true)} employees={employees} area={masterArea} onArea={openArea}
-        onCreate={()=>setShowCreateLoginModal(true)} onNavigate={onNavigate}
+        onCreate={()=>CLOUD_MODE ? openArea('users') : setShowCreateLoginModal(true)} onNavigate={onNavigate}
         onLogs={()=>openArea('reports',true)} onAudit={()=>openArea('reports',true)}
         onWatchdog={()=>{if(window.confirm('Executar a auditoria Watchdog SLA 48h e registrar os resultados?')){handleRunSlaWatchdogAudit();openArea('reports');}}}
         onExport={kind=>{if(kind==='reads')handleExportCorporateCsvReport('leituras');else if(kind==='requests')handleExportCorporateCsvReport('sla_solicitacoes');else if(kind==='compliance')handleExportEmployeeComplianceMatrixCsv();else handleExportGovernanceJsonSnapshot();}} />
       <CorporateModal isOpen={showDriverCenter} onClose={()=>setShowDriverCenter(false)} title="Gestão de Motoristas" maxWidth="6xl"><DriverCenter admin/></CorporateModal>
       <section id="am-workspace" className="am-workspace" aria-label="Funcionalidades da Administração">
-        <div className="am-workspace-heading"><div><h2>{({users:'Usuários & Acessos',system:'Sistema',permissions:'Permissões',reports:'Relatórios e Auditoria',backups:'Backups e Restauração'})[masterArea]}</h2><p>{masterArea==='permissions'?'Selecione uma conta e utilize a ação Alterar Permissões.':masterArea==='backups'?(CLOUD_MODE ? 'Exportação operacional e recuperação da identidade visual da homologação.' : 'Exportação e restauração do estado local do portal.'):'Recursos existentes, permissões e histórico preservados.'}</p></div></div>
+        <div className="am-workspace-heading"><div><h2>{({users:'Usuários & Acessos',system:'Sistema',permissions:'Permissões',reports:'Relatórios e Auditoria',backups:'Backups e Restauração'})[masterArea]}</h2><p>{masterArea==='permissions'?(CLOUD_MODE ? 'Confira e aplique os perfis previstos por setor.' : 'Selecione uma conta e utilize a ação Alterar Permissões.'):masterArea==='backups'?(CLOUD_MODE ? 'Exportação operacional e recuperação da identidade visual da homologação.' : 'Exportação e restauração do estado local do portal.'):'Recursos existentes, permissões e histórico preservados.'}</p></div></div>
+        {CLOUD_MODE && (masterArea === 'users' || masterArea === 'permissions') && <CloudRoster onChanged={() => setRosterRevision(revision => revision + 1)} />}
         {isStrictAdmin && (masterArea === 'users' || masterArea === 'permissions') && (
           <AccessReleaseTab
+            key={rosterRevision}
             currentUser={currentUser}
             systemConfig={systemConfig}
             onPendingCountChange={(cnt) => {
@@ -6312,6 +6317,7 @@ const ModulesViewContent: React.FC<ModulesViewProps> = ({
 
         {/* FASE 9: Crachá Funcional Digital Corporativo + Governança & LGPD */}
         <div className="rv-profile-aux">
+          {CLOUD_MODE && <CloudPasswordForm />}
           {/* Digital Corporate Badge */}
           <section className="rv-profile-credential"><div className="rv-profile-section-heading"><span className="rv-profile-icon"><ShieldCheck size={23}/></span><div><h2>Identificação Funcional</h2><p>Sua credencial corporativa de identificação.</p></div></div>
           <div className="md:col-span-6 bg-[#080B0D] text-white rounded-2xl p-5 border border-[#FFD400]/40 shadow-lg flex flex-col justify-between">

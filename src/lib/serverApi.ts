@@ -361,6 +361,7 @@ export async function apiUpdateProfile(payload: {
   phoneExt?: string;
   login?: string;
   password?: string;
+  currentPassword?: string;
 }): Promise<{
   ok: boolean;
   user?: Employee;

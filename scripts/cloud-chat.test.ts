@@ -11,6 +11,8 @@ import { FirestoreFreightStore } from '../src/server/cloud/freightStore';
 import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
 import { bootstrapAdmin } from '../src/server/cloud/bootstrapAdmin';
 import { verifyRemoteModules } from './cloud-modules.integration';
+import { AUTHORIZED_ROSTER } from '../src/lib/accessPolicy';
+import { canConfirmFreightPayment, hasPagePermission } from '../src/lib/permissions';
 
 let protectedAdminSession: { sessionId: string; csrfToken: string };
 
@@ -47,6 +49,105 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
     body: JSON.stringify({ action, accessLevel: 'ADMINISTRADOR', reason: 'TESTE de homologação' }),
   });
   try {
+    const authHeaders = (authSession: typeof protectedAdminSession) => ({
+      'Content-Type': 'application/json', 'X-Rodovar-Session': authSession.sessionId, 'X-CSRF-Token': authSession.csrfToken,
+    });
+    const rosterPath = base + '/roster';
+    assert.equal((await fetch(rosterPath, { headers: authHeaders(old) })).status, 403);
+    const readRoster = async () => {
+      const response = await fetch(rosterPath, { headers: authHeaders(changed) });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const rosterBefore = await readRoster();
+    assert.equal(rosterBefore.administratorPreserved, true);
+    assert.equal(rosterBefore.roster.length, 15);
+    assert.deepEqual(rosterBefore.roster.map(({ name, profile }: typeof AUTHORIZED_ROSTER[number]) => ({ name, profile })), AUTHORIZED_ROSTER);
+    assert.equal(rosterBefore.unlinkedActive, 1);
+    const profiles = new Map<string, any>(rosterBefore.roster.map((slot: any) => [slot.profile, slot]));
+    const rhSlot = profiles.get('RH'), commercialSlot = profiles.get('COMERCIAL');
+    const testUid = 'roster-staff-test', testEmail = testUid + '@example.test';
+    await runtime.auth.createUser({ uid: testUid, email: testEmail, password });
+    const payload = { uid: testUid, email: testEmail, login: 'roster.staff.test', slot: rhSlot.slot, confirm: true };
+    const link = (body: object, authSession = changed) => fetch(rosterPath, {
+      method: 'POST', headers: authHeaders(authSession), body: JSON.stringify(body),
+    });
+    assert.equal((await link(payload, old)).status, 403);
+    assert.equal((await link({ ...payload, uid }, changed)).status, 403);
+    assert.equal((await link({ ...payload, uid: 'roster-unknown' })).status, 404);
+    assert.equal((await link({ ...payload, email: 'wrong@example.test' })).status, 409);
+    assert.equal((await link({ ...payload, email: 'staff@rodovar.com.br' })).status, 400);
+    const simultaneous = await Promise.all([link(payload), link(payload)]);
+    assert.deepEqual(simultaneous.map(response => response.status), [200, 200]);
+    assert.equal((await runtime.db.collection('audit_logs').where('action', '==', 'ROSTER_IDENTITY_LINKED').get()).size, 1);
+    assert.equal((await link({ ...payload, slot: commercialSlot.slot })).status, 409);
+    const extraUid = 'roster-collision-test', extraEmail = extraUid + '@example.test';
+    await runtime.auth.createUser({ uid: extraUid, email: extraEmail, password });
+    assert.equal((await link({ ...payload, uid: extraUid, email: extraEmail, slot: commercialSlot.slot })).status, 409);
+    assert.equal((await link({ ...payload, uid: extraUid, email: extraEmail, login: 'other.staff.test' })).status, 409);
+
+    const temporary = await service.login({ identifier: payload.login, password, rememberMe: true });
+    const cloudPath = base.replace(/\/admin$/, '');
+    const profilePath = cloudPath + '/profile';
+    const change = (body: object, authSession = temporary) => fetch(profilePath, {
+      method: 'PUT', headers: authHeaders(authSession), body: JSON.stringify(body),
+    });
+    assert.equal((await fetch(cloudPath + '/session', { headers: authHeaders(temporary) })).status, 403);
+    assert.equal((await readRoster()).roster.find((entry: any) => entry.uid === testUid).mustChangePassword, true);
+    const personalPassword = crypto.randomBytes(24).toString('base64url');
+    const firstResponse = await change({ password: personalPassword });
+    assert.equal(firstResponse.status, 200);
+    const first = await firstResponse.json();
+    assert.equal(first.user.mustChangePassword, false);
+    assert.ok(first.expiresAt - Date.now() > 13 * 86400000);
+    await assert.rejects(service.session(temporary.sessionId), { status: 401 });
+    await assert.rejects(service.login({ identifier: payload.login, password }), { status: 401 });
+    assert.equal((await change({ password: 'new-password-to-test' }, first)).status, 400);
+    assert.equal((await change({ currentPassword: 'wrong', password: 'new-password-to-test' }, first)).status, 400);
+    const secondDevice = await service.login({ identifier: testEmail, password: personalPassword });
+    const nextPassword = crypto.randomBytes(24).toString('base64url');
+    const rotate = await Promise.all([
+      change({ currentPassword: personalPassword, password: nextPassword }, first),
+      change({ currentPassword: personalPassword, password: nextPassword }, first),
+    ]);
+    const rotatedResponse = rotate.find(response => response.ok);
+    assert.equal(rotate.filter(response => response.ok).length, 1);
+    const rotated = await rotatedResponse!.json();
+    await assert.rejects(service.session(first.sessionId), { status: 401 });
+    await assert.rejects(service.session(secondDevice.sessionId), { status: 401 });
+    assert.equal((await service.session(rotated.sessionId)).user.id, testUid);
+    const applyProfile = (authSession = changed, body: object = { confirm: true }) => fetch(rosterPath + '/' + rhSlot.slot + '/profile', {
+      method: 'PATCH', headers: authHeaders(authSession), body: JSON.stringify(body),
+    });
+    assert.equal((await applyProfile(rotated)).status, 403);
+    assert.equal((await applyProfile(changed, { confirm: true, accessLevel: 'ADMINISTRADOR' })).status, 400);
+    await runtime.db.collection('users').doc(testUid).update({ accessProfile: 'FINANCEIRO' });
+    assert.equal((await readRoster()).roster.find((entry: any) => entry.uid === testUid).profileMatches, false);
+    assert.equal((await applyProfile()).status, 200);
+    await assert.rejects(service.session(rotated.sessionId), { status: 401 });
+    assert.equal((await readRoster()).roster.find((entry: any) => entry.uid === testUid).profileMatches, true);
+    assert.equal((await service.login({ identifier: payload.login, password: nextPassword })).user.accessProfile, 'RH');
+
+    const expectedPages = {
+      RH: ['solicitacoes'], DIRETORIA: ['fretes_ativos', 'financeiro', 'solicitacoes'],
+      MONITORAMENTO: ['fretes_ativos', 'financeiro', 'solicitacoes'], COMERCIAL: ['fretes_comercial'],
+      EXPEDICAO: ['fretes_expedicao'], FINANCEIRO: ['fretes_ativos', 'financeiro', 'solicitacoes'],
+    };
+    const checkedPages = ['administracao', 'fretes_ativos', 'fretes_comercial', 'fretes_expedicao', 'financeiro', 'solicitacoes'];
+    for (const [profile, slot] of profiles) {
+      const login = 'roster.' + profile.toLowerCase(), email = login + '@example.test';
+      if (profile !== 'RH') {
+        const uid = 'slot-' + profile;
+        await runtime.auth.createUser({ uid, email, password });
+        assert.equal((await link({ slot: slot.slot, uid, email, login, confirm: true })).status, 200);
+      }
+      const account = await service.login(profile === 'RH'
+        ? { identifier: payload.login, password: nextPassword }
+        : { identifier: login, password });
+      assert.deepEqual(checkedPages.filter(page => hasPagePermission(account.user as any, page)), expectedPages[profile as keyof typeof expectedPages]);
+      assert.equal(canConfirmFreightPayment(account.user as any), profile === 'FINANCEIRO');
+    }
+
     const brandingPath = base.replace(/\/admin$/, '/system-config');
     const { systemConfig } = await (await fetch(brandingPath)).json();
     const publish = (payload: object, authSession = changed) => fetch(brandingPath + '/publish', {

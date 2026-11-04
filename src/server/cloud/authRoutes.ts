@@ -15,10 +15,10 @@ export function registerCloudAuthRoutes(app: Express, service: CloudAuthService)
         res.json(await service.updateProfile(cloudSessionId(req), String(req.headers['x-csrf-token'] || ''), req.body));
         return;
       }
-      if (keys.length !== 1 || keys[0] !== 'password') {
+      if (!keys.includes('password') || keys.some(key => key !== 'password' && key !== 'currentPassword')) {
         res.status(400).json({ error: 'Campos de perfil não autorizados.' }); return;
       }
-      const result = await service.firstPassword(cloudSessionId(req), String(req.headers['x-csrf-token'] || ''), req.body?.password);
+      const result = await service.changePassword(cloudSessionId(req), String(req.headers['x-csrf-token'] || ''), req.body.password, req.body.currentPassword);
       res.cookie('rodovar_cloud_sid', result.sessionId, { httpOnly: true, secure: Boolean(process.env.VERCEL) || req.secure,
         sameSite: 'lax', path: '/api/cloud', maxAge: result.expiresAt - Date.now() });
       res.json(result);
