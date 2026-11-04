@@ -90,12 +90,20 @@ export async function verifyRemoteModules(adminSession: { sessionId: string; csr
     f = (await call('mon', `/meus-fretes/${f.id}/monitoramento-action`, { action: 'AVANCAR_ETAPA', targetStage: 'FINALIZADO', baseRevision: f.revision })).freight;
     assert.equal(f.situacaoMonitoramento, 'FINALIZADO');
     assert.equal((await call('fin', '/pagamentos/fretes')).freights.find((r: any) => r.id === f.id).adiantamentoPago, false);
-    const request = (await call('mon', '/requests', { subject: 'TESTE protocolo', description: 'Solicitação fictícia isolada', targetDepartment: 'Recursos Humanos' }, 'POST', 201)).request;
+    const request = (await call('mon', '/requests', { subject: 'TESTE protocolo', description: 'Solicitação fictícia isolada', targetDepartment: 'Recursos Humanos', attachment: { name: 'solicitacao-teste.pdf', dataUrl: proofUpload.dataUrl } }, 'POST', 201)).request;
     assert.ok(!(await call('other', '/requests')).requests.some((r: any) => r.id === request.id));
     for (const rh of ['rh', 'rh2']) assert.ok((await call(rh, '/requests')).notifications.some((n: any) => n.targetId === request.id));
     await call('rh', `/requests/${request.id}/claim`, {});
     await call('rh2', `/requests/${request.id}/claim`, {}, 'POST', 409);
-    await call('rh', `/requests/${request.id}/response`, { note: 'Resposta de teste persistida' });
+    const reply = await call('rh', `/requests/${request.id}/response`, {
+      note: 'Resposta de teste persistida', attachment: { name: 'resposta-teste.pdf', dataUrl: proofUpload.dataUrl },
+    });
+    const requestDownloadPath = '/requests/' + request.id + '/attachments/' + reply.request.attachments[1].id;
+    await call('other', requestDownloadPath, undefined, 'GET', 404);
+    const downloadRequestFile = () => fetch(base + requestDownloadPath, { headers: { 'X-Rodovar-Session': actors.mon.sessionId } });
+    const replyFile = await downloadRequestFile();
+    assert.equal(replyFile.status, 200);
+    assert.deepEqual(Buffer.from(await replyFile.arrayBuffer()), pdf);
     await call('rh', `/requests/${request.id}/status`, { status: 'Concluída' });
     await call('mon', '/rh-external', undefined, 'GET', 403);
     const external = (await call('rh', '/rh-external', {
@@ -130,6 +138,7 @@ export async function verifyRemoteModules(adminSession: { sessionId: string; csr
     base = `http://127.0.0.1:${(server.address() as any).port}/api/cloud`;
     assert.equal((await call('mon', `/meus-fretes/${f.id}`)).freight.id, f.id);
     assert.deepEqual(Buffer.from(await (await readFile()).arrayBuffer()), pdf);
+    assert.deepEqual(Buffer.from(await (await downloadRequestFile()).arrayBuffer()), pdf);
     assert.equal((await call('mon', '/requests')).requests.find((r: any) => r.id === request.id).status, 'Concluída');
     assert.equal((await call('other', `/chat/conversations/${group.id}/messages`))[0].text, 'Mensagem de teste persistida');
     const exportPath = '/admin/backups/operations/export';

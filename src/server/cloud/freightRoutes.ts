@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import type { Express, RequestHandler } from 'express';
 import type { Firestore } from 'firebase-admin/firestore';
 import { canViewFreightTeam } from '../../lib/permissions.js';
-import { readFreightFile, validateFreightUpload, writeFreightFiles } from './freightFiles.js';
+import { readPrivateFile, validateFreightUpload, writePrivateFiles } from './freightFiles.js';
 import type { Employee, UnifiedFreightAttachment, UnifiedFreightRecord } from '../../types';
 import { canUserAccessFreightRecord, emptyFreightEngineState, registerUnifiedFreightRoutes, withFreightEngineState } from '../unifiedFreightEngine.js';
 
@@ -59,7 +59,7 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
           if (!canUserAccessFreightRecord(freight, user) || unclaimed) return fail('Sem permissão para baixar documentos deste frete.', 403);
           const att = (details.data()?.anexos as UnifiedFreightAttachment[] | undefined)?.find(item => item.id === attId);
           if (!att || att.freightId !== freightId) return fail('Anexo não encontrado.', 404);
-          const file = await readFreightFile(tx, db, att);
+          const file = await readPrivateFile(tx, db, att);
           return { file, mimeType: att.mimeType, fileName: att.fileName };
         }
         if (attachmentRoute) {
@@ -120,17 +120,17 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
             const completed = state.freightsIndex.get(freightId);
             const proof = state.freightSubDocs.get(freightId)?.anexos.find(att => att.id === completed?.comprovanteEntregaAnexoId);
             if (!proof) return fail('Comprovante de entrega indisponível.', 409);
-            await readFreightFile(tx, db, proof);
+            await readPrivateFile(tx, db, proof);
           }
           if (verifying && req.body?.conferido !== false) {
             const attachment = beforeFiles.find(att => att.id === req.params.attId);
             if (!attachment) return fail('Anexo não encontrado.', 404);
-            await readFreightFile(tx, db, attachment);
+            await readPrivateFile(tx, db, attachment);
           }
           if (attachmentRoute) {
             const retained = new Set(state.freightSubDocs.get(freightId)?.anexos.map(att => att.id));
             const removed = beforeFiles.filter(att => !retained.has(att.id));
-            await writeFreightFiles(tx, db, freightId, fileToSave, removed);
+            await writePrivateFiles(tx, db, freightId, fileToSave, removed);
           }
           const desired = [state.freightsIndex, state.freightSubDocs, new Map(state.serverNotifications.map(n => [n.id, n]))];
           for (const [i, snapshotIndex] of [0, 1, 4].entries()) {

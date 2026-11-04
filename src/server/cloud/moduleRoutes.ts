@@ -3,6 +3,8 @@ import type { Express, RequestHandler } from 'express';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { registerAgenda } from '../agenda.js';
 import { registerMural } from '../mural.js';
+import { readPrivateFile, writePrivateFiles } from './freightFiles.js';
+import type { RequestAttachment } from '../../types';
 import { registerRequestQueue } from '../requestQueue.js';
 import { registerPolls } from '../muralPolls.js';
 import { registerExternalRh, canAccessExternalRh } from '../externalRh.js';
@@ -143,7 +145,7 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
         if (module.page && !hasPagePermission(req.sessionUser, module.page)) { res.status(403).json({ error: 'Módulo não autorizado.' }); return; }
         if (route.path.endsWith('/import')) { res.status(403).json({ error: 'Importação de dados locais desabilitada na homologação.' }); return; }
         if (module.name === 'rh-external' && !canAccessExternalRh(req.sessionUser)) { res.status(403).json({ error: 'Acesso exclusivo ao RH.' }); return; }
-        if ((module.name === 'rh-external' && route.path.includes('/documents')) || route.path.includes('/attachments/') || /\/(comprovantes|shared-staging)(\/|$)/.test(route.path) || route.path.endsWith('/document') || JSON.stringify(req.body || {}).includes('data:')) {
+        if ((module.name === 'rh-external' && route.path.includes('/documents')) || (module.name !== 'requests' && route.path.includes('/attachments/')) || /\/(comprovantes|shared-staging)(\/|$)/.test(route.path) || route.path.endsWith('/document') || (module.name !== 'requests' && JSON.stringify(req.body || {}).includes('data:'))) {
           res.status(503).json({ error: 'Armazenamento de anexos ainda não configurado. Nenhuma alteração foi salva.', code: 'STORAGE_NOT_CONFIGURED' }); return;
         }
         const mutation = req.method !== 'GET', rawKey = String(req.headers['x-idempotency-key'] || '');
@@ -177,7 +179,19 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           const handler = capture(r => module.mount(r, state, users)).find(r => r.method === route.method && r.path === route.path);
           let status = 200, response: any;
           const out: any = { setHeader() {}, status(n: number) { status = n; return out; }, json(body: any) { response = { status, body: clean(body) }; return out; } };
-          const request = { body: req.body, query: req.query, params: req.params, headers: req.headers, sessionUser: actor, ip: req.ip, method: req.method, path: req.path };
+          let upload: { recordId: string; name: string; bytes: Buffer } | undefined;
+          const request = {
+            saveRequestAttachment(recordId: string, attachment: RequestAttachment, bytes: Buffer) {
+              upload = { recordId, name: 'rdoc-' + attachment.id, bytes };
+            },
+            async sendRequestAttachment(recordId: string, attachment: RequestAttachment) {
+              const file = await readPrivateFile(tx, db, {
+                freightId: recordId, storageName: 'rdoc-' + attachment.id,
+                sizeBytes: attachment.size, mimeType: attachment.mimeType,
+              });
+              response = { file, fileName: attachment.name, mimeType: attachment.mimeType };
+            },
+            body: req.body, query: req.query, params: req.params, headers: req.headers, sessionUser: actor, ip: req.ip, method: req.method, path: req.path };
           const execute = async (i: number): Promise<void> => {
             if (!handler.handlers[i] || response) return;
             let advance = false;
@@ -186,7 +200,9 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           };
           if (module.name === 'finance') await withPaymentStore(state as any, () => execute(0)); else await execute(0);
           if (!response) fail('Resposta do módulo indisponível.');
+          if (response.file) return response;
           if (response.status < 400) {
+            if (upload) await writePrivateFiles(tx, db, upload.recordId, upload, []);
             const after = JSON.stringify(state);
             if (Buffer.byteLength(after) > 850000) fail('O módulo atingiu o limite de homologação. Nenhum registro foi apagado; é necessário particionar a persistência.');
             if (after !== before) tx.set(ref, clean(state));
@@ -197,6 +213,13 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           }
           return response;
         });
+        if (result.file) {
+          res.attachment(result.fileName);
+          res.setHeader('Content-Type', result.mimeType);
+          res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+          res.send(result.file);
+          return;
+        }
         res.status(result.status).json(result.body);
       } catch (error) { next(error); }
     });

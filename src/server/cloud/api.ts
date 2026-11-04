@@ -21,7 +21,8 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   const attachmentJson = express.json({ limit: '4200kb', inflate: false });
   app.use((req, res, next) => {
     const attachment = req.method === 'POST' && /^\/api\/cloud\/meus-fretes\/[A-Za-z0-9_-]+\/attachments$/.test(req.path);
-    (attachment ? attachmentJson : standardJson)(req, res, next);
+    const requestAttachment = req.method === 'POST' && /^\/api\/cloud\/requests(?:\/[A-Za-z0-9_-]+\/response)?$/.test(req.path);
+    (attachment || requestAttachment ? attachmentJson : standardJson)(req, res, next);
   });
   app.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');

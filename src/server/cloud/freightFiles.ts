@@ -23,11 +23,11 @@ export function validateFreightUpload(dataUrl: unknown) {
 }
 
 function fileRef(db: Firestore, name: string) {
-  if (typeof name !== 'string' || !/^fdoc-[A-Za-z0-9_.-]{1,200}$/.test(name)) return fail('Arquivo privado indisponível.', 404);
+  if (typeof name !== 'string' || !/^(?:fdoc|rdoc)-[A-Za-z0-9_.-]{1,200}$/.test(name)) return fail('Arquivo privado indisponível.', 404);
   return db.collection('freight_private_files').doc(name);
 }
 
-export async function writeFreightFiles(
+export async function writePrivateFiles(
   tx: Transaction, db: Firestore, freightId: string,
   upload: { name: string; bytes: Buffer } | undefined, removed: UnifiedFreightAttachment[],
 ) {
@@ -67,7 +67,7 @@ function validSize(size: number, parts: number) {
   return Number.isSafeInteger(size) && size > 0 && size <= PREVIEW_FREIGHT_FILE_LIMIT && parts === Math.ceil(size / CHUNK_SIZE);
 }
 
-export async function requireFreightFile(tx: Transaction, db: Firestore, att: UnifiedFreightAttachment) {
+async function requirePrivateFile(tx: Transaction, db: Firestore, att: Pick<UnifiedFreightAttachment, 'storageName' | 'freightId' | 'sizeBytes' | 'mimeType'>) {
   const ref = fileRef(db, att.storageName);
   const info = (await tx.get(ref)).data();
   if (!info || info.freightId !== att.freightId || !validSize(info.size, info.parts) || info.size !== att.sizeBytes || !mimeTypes.has(att.mimeType)) {
@@ -76,8 +76,8 @@ export async function requireFreightFile(tx: Transaction, db: Firestore, att: Un
   return { ref, info };
 }
 
-export async function readFreightFile(tx: Transaction, db: Firestore, att: UnifiedFreightAttachment) {
-  const { ref, info } = await requireFreightFile(tx, db, att);
+export async function readPrivateFile(tx: Transaction, db: Firestore, att: Pick<UnifiedFreightAttachment, 'storageName' | 'freightId' | 'sizeBytes' | 'mimeType'>) {
+  const { ref, info } = await requirePrivateFile(tx, db, att);
   const chunks = await tx.getAll(...Array.from({ length: info.parts }, (_, i) => ref.collection('freight_file_parts').doc(String(i))));
   const bytes = chunks.map(chunk => chunk.data()?.bytes);
   if (!bytes.every(Buffer.isBuffer)) return fail('Arquivo incompleto. Envie novamente o documento.', 409);
