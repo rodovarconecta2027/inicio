@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { PREVIEW_FREIGHT_FILE_LIMIT } from '../lib/freightFileLimits.js';
 import {financialProjection} from './financialProjection.js';
 import {subscribeUnifiedFinance,unifiedFinanceFreights} from './unifiedFreightEngine.js';
 import { Express, Request, Response } from 'express';
@@ -226,6 +227,20 @@ function savePaymentStore(): void {
   fs.writeFileSync(STAGED_SHARES_FILE, JSON.stringify(currentPaymentState().stagedShares, null, 2), 'utf8');
 }
 
+function installmentLabel(freight: FreightRecord, installment: PaymentInstallmentType) {
+  if (installment === 'SALDO') return 'Saldo';
+  return freight.regraTipo === 'INTEGRAL_100' ? 'Pagamento Integral' : 'Adiantamento';
+}
+
+function remoteInstallmentError(freight: FreightRecord, installment: PaymentInstallmentType) {
+  if (installment === 'SALDO' && (freight.regraTipo === 'INTEGRAL_100' || !freight.adiantamentoPago || !freight.entregaConfirmada))
+    return 'O saldo exige adiantamento confirmado e entrega registrada pelo Monitoramento.';
+  const paid = installment === 'ADIANTAMENTO' ? freight.adiantamentoPago : freight.saldoPago;
+  const amount = installment === 'ADIANTAMENTO' ? freight.valorAdiantamento : freight.valorSaldo;
+  if (paid) return 'Esta parcela já foi confirmada.';
+  if (!Number.isFinite(amount) || amount <= 0) return 'Esta parcela não possui valor a pagar.';
+}
+
 function enrichFreightWithReceipts(freight: FreightRecord): FreightRecord {
   const freightReceipts = currentPaymentState().receipts.filter((r) => r.freightId === freight.id);
   const freightHistory = currentPaymentState().history.filter((h) => h.freightId === freight.id);
@@ -253,7 +268,7 @@ function enrichFreightWithReceipts(freight: FreightRecord): FreightRecord {
     docs.comprovanteAdiantamento = {
       id: latestAdiantamento.id,
       type: 'COMPROVANTE_ADIANTAMENTO',
-      label: 'Comprovante de Adiantamento',
+      label: 'Comprovante de ' + installmentLabel(freight, 'ADIANTAMENTO'),
       fileName: latestAdiantamento.originalFileName,
       mimeType: latestAdiantamento.mimeType,
       sizeLabel: latestAdiantamento.sizeLabel,
@@ -634,6 +649,14 @@ export function registerPaymentReceiptRoutes(
   ) => void,
   options: { remote?: boolean } = {}
 ): void {
+  const canProcessInstallment = (req: any, res: Response, freight: FreightRecord, installment: PaymentInstallmentType) => {
+    const reason = options.remote && (req.isPaymentFreightBlocked(freight.id)
+      ? 'Frete indisponível para pagamento ou com valores divergentes da Expedição. Confira o registro operacional.'
+      : remoteInstallmentError(freight, installment));
+    if (!reason) return true;
+    res.status(409).json({ error: reason, code: 'INSTALLMENT_NOT_AVAILABLE' });
+    return false;
+  };
   if (!options.remote) loadOrSeedPaymentStore();
   const syncUnified=(freight:any)=>{
     const index=currentPaymentState().freights.findIndex(f=>f.id===freight.id);
@@ -864,6 +887,9 @@ export function registerPaymentReceiptRoutes(
     }
 
     const patch = req.body || {};
+    if (options.remote && Object.keys(patch).some(key => key !== 'observacoes')) {
+      res.status(409).json({ error: 'Entrega, documentos e pagamentos devem ser registrados em seus fluxos autorizados.' }); return;
+    }
     const current = currentPaymentState().freights[existingIdx];
 
     if (patch.status === 'Pago' && current.status !== 'Pago') {
@@ -924,13 +950,14 @@ export function registerPaymentReceiptRoutes(
       return;
     }
 
+    if (!canProcessInstallment(req, res, freight, normalizedType)) return;
     const expectedAmountBRL =
       normalizedType === 'ADIANTAMENTO' ? freight.valorAdiantamento : freight.valorSaldo;
     const expectedAmountCentavos = Math.round(expectedAmountBRL * 100);
 
     if (expectedAmountCentavos <= 0) {
       res.status(400).json({
-        error: `A parcela ${normalizedType === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} possui valor R$ 0,00 neste frete.`,
+        error: `A parcela ${installmentLabel(freight, normalizedType)} possui valor R$ 0,00 neste frete.`,
         code: 'ZERO_INSTALLMENT_AMOUNT',
       });
       return;
@@ -998,7 +1025,7 @@ export function registerPaymentReceiptRoutes(
       actorId: user.id,
       actorName: user.name,
       actorRole: user.roleTitle,
-      summary: `Pagamento preparado para ${normalizedType === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} (${expectedAmountBRL.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) — Aguardando comprovante até ${spExp.formatted}.`,
+      summary: `Pagamento preparado para ${installmentLabel(freight, normalizedType)} (${expectedAmountBRL.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) — Aguardando comprovante até ${spExp.formatted}.`,
       intentId: intent.id,
       amountBRL: expectedAmountBRL,
     });
@@ -1158,6 +1185,10 @@ export function registerPaymentReceiptRoutes(
         if (rawBase64) {
           const cleanBase64 = rawBase64.includes(',') ? rawBase64.split(',')[1] : rawBase64;
           fileBuffer = Buffer.from(cleanBase64, 'base64');
+          if (options.remote && fileBuffer.toString('base64') !== cleanBase64) {
+            res.status(400).json({ error: 'O comprovante enviado está corrompido. Selecione o arquivo novamente.' });
+            return;
+          }
         }
       }
 
@@ -1204,6 +1235,11 @@ export function registerPaymentReceiptRoutes(
           });
           return;
         }
+        if (options.remote && (matchedIntent.freightId !== freight.id || matchedIntent.installmentType !== installmentType ||
+            matchedIntent.status === 'CANCELADA' || matchedIntent.status === 'CONCLUIDA')) {
+          res.status(409).json({ error: 'A intenção de pagamento não corresponde ao frete e à parcela selecionados ou já está encerrada.' });
+          return;
+        }
         if (matchedIntent.status === 'EXPIRADA') {
           res.status(409).json({
             error:
@@ -1241,6 +1277,11 @@ export function registerPaymentReceiptRoutes(
         return;
       }
 
+      if (!canProcessInstallment(req, res, freight, installmentType)) return;
+      if (options.remote && fileBuffer.length > PREVIEW_FREIGHT_FILE_LIMIT) {
+        res.status(413).json({ error: 'O comprovante excede o limite de 3 MB da homologação.', code: 'FILE_TOO_LARGE' });
+        return;
+      }
       const validation = validatePaymentReceiptBinary(fileBuffer, originalFileName);
       if (!validation.valid || !validation.mimeType || !validation.extension) {
         const status = validation.code === 'FILE_TOO_LARGE' ? 413 : 400;
@@ -1255,16 +1296,19 @@ export function registerPaymentReceiptRoutes(
       const sha256Hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
       const duplicateReceipt = currentPaymentState().receipts.find((r) => r.sha256Hash === sha256Hash);
 
+      if (options.remote && duplicateReceipt) {
+        res.status(409).json({ error: 'Este arquivo já está vinculado a um comprovante. Consulte o histórico antes de reenviar.', code: 'DUPLICATE_RECEIPT' });
+        return;
+      }
+
       // Check if this freight + installment already has an attached receipt (for audit trail of replacement without silent overwrite)
       const previousInstallmentReceipt = currentPaymentState().receipts.find(
         (r) => r.freightId === freight.id && r.installmentType === installmentType
       );
 
       const receiptId = `rec-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-      const safeStorageName = `comprovante-${freight.id}-${installmentType.toLowerCase()}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${validation.extension}`;
-      const absStoragePath = path.join(PAYMENT_RECEIPTS_DIR, safeStorageName);
-
-      fs.writeFileSync(absStoragePath, fileBuffer);
+      const safeStorageName = options.remote ? 'pdoc-' + receiptId + '.' + validation.extension : `comprovante-${freight.id}-${installmentType.toLowerCase()}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${validation.extension}`;
+      if (!options.remote) fs.writeFileSync(path.join(PAYMENT_RECEIPTS_DIR, safeStorageName), fileBuffer);
 
       const spNow = formatSaoPauloDateTime();
       const expectedAmountBRL =
@@ -1285,10 +1329,7 @@ export function registerPaymentReceiptRoutes(
         freightCode: freight.code,
         installmentId: `${freight.id}:${installmentType}`,
         installmentType,
-        title:
-          installmentType === 'ADIANTAMENTO'
-            ? 'Comprovante de Adiantamento'
-            : 'Comprovante de Saldo',
+        title: 'Comprovante de ' + installmentLabel(freight, installmentType),
         expectedAmountCentavos,
         expectedAmountBRL,
         favorecido: freight.favorecido,
@@ -1297,7 +1338,7 @@ export function registerPaymentReceiptRoutes(
         uploadedByUserEmail: user.email,
         originalFileName: path.basename(originalFileName).replace(/[^\w.\-() ]+/g, '_'),
         storageFileName: safeStorageName,
-        storageRelativePath: `data/payment-receipts/${safeStorageName}`,
+        storageRelativePath: options.remote ? '' : `data/payment-receipts/${safeStorageName}`,
         mimeType: validation.mimeType,
         sizeBytes: fileBuffer.length,
         sizeLabel: formatFileSize(fileBuffer.length),
@@ -1315,9 +1356,10 @@ export function registerPaymentReceiptRoutes(
         replacedReceiptId: previousInstallmentReceipt?.id,
         serverCreatedAtIso: spNow.iso,
         serverCreatedAtFormatted: spNow.formatted,
-        downloadUrl: `/api/pagamentos/comprovantes/${receiptId}/download`,
+        downloadUrl: `/api${options.remote ? '/cloud' : ''}/pagamentos/comprovantes/${receiptId}/download`,
       };
 
+      if (options.remote) req.savePaymentReceipt(receiptRecord, fileBuffer);
       currentPaymentState().receipts.unshift(receiptRecord);
 
       if (matchedIntent) {
@@ -1409,14 +1451,14 @@ export function registerPaymentReceiptRoutes(
   app.post(
     '/api/pagamentos/comprovantes/:receiptId/confirmar',
     requireApprovedSession,
-    (req: any, res: Response) => {
+    async (req: any, res: Response, next) => {
       const user = requireFinanceiroPermission(req, res);
       if (!user) return;
 
       if (!canConfirmFreightPayment(user)) {
         res.status(403).json({
           error:
-            'Acesso negado. Apenas usuários com permissão de "Confirmar Liquidação de Pagamentos" (Coordenador Financeiro, Diretoria ou Administrador) podem confirmar a liquidação bancária.',
+            'Acesso negado. Apenas usuários com permissão de "Confirmar Liquidação de Pagamentos" podem confirmar a liquidação bancária.',
           code: 'FORBIDDEN_CONFIRM_PAYMENT',
         });
         return;
@@ -1441,10 +1483,31 @@ export function registerPaymentReceiptRoutes(
         return;
       }
 
+      if (options.remote) {
+        if (receipt.verificationStatus === 'PAGAMENTO_CONFIRMADO') {
+          res.json({ ok: true, receipt, freight: enrichFreightWithReceipts(freight), message: 'Pagamento já confirmado.' });
+          return;
+        }
+        const latest = currentPaymentState().receipts.find(item =>
+          item.freightId === freight.id && item.installmentType === receipt.installmentType);
+        if (latest?.id !== receipt.id) {
+          res.status(409).json({ error: 'Este comprovante foi substituído. Confira o arquivo mais recente.' });
+          return;
+        }
+        if (!canProcessInstallment(req, res, freight, receipt.installmentType)) return;
+        const currentAmount = receipt.installmentType === 'ADIANTAMENTO' ? freight.valorAdiantamento : freight.valorSaldo;
+        if (Math.round(currentAmount * 100) !== receipt.expectedAmountCentavos) {
+          res.status(409).json({ error: 'O valor da parcela foi alterado. Confira e envie um comprovante atualizado.' });
+          return;
+        }
+        try { await req.readPaymentReceipt(receipt); }
+        catch (error) { next(error); return; }
+      }
+
       const { transactionCode, acknowledgeScheduledProof } = req.body || {};
 
       // Requirement 6: "Comprovantes de agendamento também devem passar por conferência."
-      if (receipt.isScheduledProof && !acknowledgeScheduledProof) {
+      if (receipt.isScheduledProof && acknowledgeScheduledProof !== true) {
         res.status(400).json({
           error:
             'Este arquivo foi identificado como comprovante de agendamento. Para confirmar a liquidação, ateste que a compensação bancária efetiva foi conferida no extrato.',
@@ -1512,7 +1575,7 @@ export function registerPaymentReceiptRoutes(
         actorId: user.id,
         actorName: user.name,
         actorRole: user.roleTitle,
-        summary: `Pagamento de ${receipt.installmentType === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} (${receipt.expectedAmountBRL.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) conferido e confirmado por ${user.name}.`,
+        summary: `Pagamento de ${installmentLabel(freight, receipt.installmentType)} (${receipt.expectedAmountBRL.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) conferido e confirmado por ${user.name}.`,
         receiptId: receipt.id,
         intentId: receipt.intentId,
         amountBRL: receipt.expectedAmountBRL,
@@ -1533,7 +1596,7 @@ export function registerPaymentReceiptRoutes(
         ok: true,
         receipt,
         freight: enrichFreightWithReceipts(freight),
-        message: `Pagamento de ${receipt.installmentType === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} confirmado com sucesso por ${user.name}.`,
+        message: `Pagamento de ${installmentLabel(freight, receipt.installmentType)} confirmado com sucesso por ${user.name}.`,
       });
     }
   );
@@ -1545,7 +1608,7 @@ export function registerPaymentReceiptRoutes(
   app.get(
     '/api/pagamentos/comprovantes/:receiptId/download',
     requireApprovedSession,
-    (req: any, res: Response) => {
+    async (req: any, res: Response, next) => {
       const user = requireFinanceiroPermission(req, res);
       if (!user) return;
 
@@ -1559,6 +1622,11 @@ export function registerPaymentReceiptRoutes(
         return;
       }
 
+      if (options.remote) {
+        try { await req.sendPaymentReceipt(receipt); }
+        catch (error) { next(error); }
+        return;
+      }
       const absPath = path.join(PAYMENT_RECEIPTS_DIR, path.basename(receipt.storageFileName));
       if (!fs.existsSync(absPath)) {
         res.status(404).json({

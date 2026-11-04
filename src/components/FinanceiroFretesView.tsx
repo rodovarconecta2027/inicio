@@ -1,4 +1,5 @@
 import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
+import { PREVIEW_FREIGHT_FILE_LIMIT } from '../lib/freightFileLimits';
 import {useNotificationRecord} from '../hooks/useNotificationRecord';
 import './PortalModernizacao.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -679,9 +680,13 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
   const openPaymentModal = (freight: FreightRecord, initialMode: PaymentInstallmentType) => {
     if (!canExecutePayment) {
       triggerToast(
-        'Acesso Restrito ao Financeiro / Diretoria',
-        'O perfil Operador pode solicitar fretes, confirmar entrega e visualizar comprovantes, mas não realizar pagamentos.'
+        'Acesso restrito ao Financeiro autorizado',
+        'Seu perfil pode consultar o frete conforme suas permissões.'
       );
+      return;
+    }
+    if (CLOUD_MODE && initialMode === 'SALDO' && (!freight.entregaConfirmada || !freight.adiantamentoPago || freight.valorSaldo <= 0)) {
+      triggerToast('Saldo indisponível', 'Aguarde a entrega registrada pelo Monitoramento e a confirmação do adiantamento.');
       return;
     }
     setPaymentModalFreight(freight);
@@ -704,6 +709,8 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
 
   // Requirement 1: Single Installment Selection — switching updates value, copied value, title, linked files, installment ID & summary together
   const handleSelectInstallmentMode = (nextMode: PaymentInstallmentType) => {
+    if (CLOUD_MODE && nextMode === 'SALDO' && paymentModalFreight &&
+        (!paymentModalFreight.entregaConfirmada || !paymentModalFreight.adiantamentoPago || paymentModalFreight.valorSaldo <= 0)) return;
     setPaymentStepMode(nextMode);
     setCopiedValue(false);
     setAcknowledgeScheduledProof(false);
@@ -713,11 +720,11 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
     if (!paymentModalFreight) return;
     const mode = paymentStepMode;
 
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > (CLOUD_MODE ? PREVIEW_FREIGHT_FILE_LIMIT : 10 * 1024 * 1024)) {
       setUploadStateByInstallment((prev) => ({ ...prev, [mode]: 'FALHA_NO_ENVIO' }));
       setUploadErrorByInstallment((prev) => ({
         ...prev,
-        [mode]: 'O arquivo excede o tamanho máximo permitido de 10 MB.',
+        [mode]: 'O arquivo excede o tamanho máximo permitido de ' + (CLOUD_MODE ? '3 MB.' : '10 MB.'),
       }));
       return;
     }
@@ -795,7 +802,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
     setUploadErrorByInstallment((prev) => ({ ...prev, [paymentStepMode]: null }));
     try {
       // Ensure the freight exists on the server payment store first
-      await fetch('/api/pagamentos/fretes', {
+      if (!CLOUD_MODE) await fetch('/api/pagamentos/fretes', {
         method: 'POST',
         headers: getAuthHeaders(),
         credentials: 'include',
@@ -836,7 +843,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
       }
 
       triggerToast(
-        `Pagamento Preparado (${paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'})`,
+        `Pagamento Preparado (${activeInstallmentLabel})`,
         'Faça o pagamento no seu banco. Depois, compartilhe o comprovante com Rodovar Conecta.'
       );
       await fetchServerPaymentData();
@@ -935,7 +942,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
 
     try {
       // Ensure freight is registered on server store
-      await fetch('/api/pagamentos/fretes', {
+      if (!CLOUD_MODE) await fetch('/api/pagamentos/fretes', {
         method: 'POST',
         headers: getAuthHeaders(),
         credentials: 'include',
@@ -1033,7 +1040,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
     try {
       const res = await fetch(`/api/pagamentos/comprovantes/${receiptId}/confirmar`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         credentials: 'include',
         body: JSON.stringify({
           transactionCode: txCodeByInstallment[mode]?.trim() || undefined,
@@ -1129,7 +1136,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
       if (dataUrl && !dataUrl.startsWith('data:')) {
         const url = new URL(dataUrl, window.location.origin);
         if (url.origin !== window.location.origin) throw new Error('Endereço de documento não autorizado.');
-        const response = await fetch(url.href, {headers:getAuthHeaders(),credentials:'include'});
+        const response = await fetch(url.pathname + url.search, {headers:getAuthHeaders(),credentials:'include'});
         if (!response.ok) {
           const detail = await response.json().catch(()=>null);
           throw new Error(detail?.code==='BINARY_NOT_FOUND' ? 'Arquivo original indisponível. Solicite ao Financeiro que anexe novamente o comprovante deste registro.' : detail?.error || 'Não foi possível acessar o arquivo.');
@@ -1171,11 +1178,10 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
       : paymentModalFreight.valorSaldo;
   }, [paymentModalFreight, paymentStepMode]);
 
-  const activeReceiptTitle = useMemo(() => {
-    return paymentStepMode === 'ADIANTAMENTO'
-      ? 'Comprovante de Adiantamento'
-      : 'Comprovante de Saldo';
-  }, [paymentStepMode]);
+  const activeInstallmentLabel = paymentStepMode === 'SALDO' ? 'Saldo'
+    : paymentModalFreight?.regraTipo === 'INTEGRAL_100' ? 'Pagamento Integral' : 'Adiantamento';
+  const activeReceiptTitle = 'Comprovante de ' + activeInstallmentLabel;
+  const balanceLocked = CLOUD_MODE && (!paymentModalFreight?.entregaConfirmada || !paymentModalFreight.adiantamentoPago);
 
   const activeInstallmentId = useMemo(() => {
     if (!paymentModalFreight) return '';
@@ -1219,9 +1225,24 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
 
   const activeConfirmationSummary = useMemo(() => {
     if (!paymentModalFreight) return '';
-    const parcelaNome = paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo';
+    const parcelaNome = activeInstallmentLabel;
     return `Salvar ${activeReceiptTitle} (${formatCurrencyBRL(activeModalAmount)}) na parcela ${parcelaNome} (${activeInstallmentId}) do Frete ${paymentModalFreight.code}`;
-  }, [paymentModalFreight, paymentStepMode, activeReceiptTitle, activeModalAmount, activeInstallmentId]);
+  }, [paymentModalFreight, activeInstallmentLabel, activeReceiptTitle, activeModalAmount, activeInstallmentId]);
+
+  const activeReceiptIsScheduled = paymentModalFreight?.comprovantesList?.some(
+    receipt => receipt.id === activeSavedDocForInstallment?.id && receipt.isScheduledProof
+  );
+  const receiptReview = activeSavedDocForInstallment && paymentModalFreight && (
+    <div className="space-y-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-950">
+      <button type="button" className="font-bold underline" onClick={() => void handleOpenDocPreview(paymentModalFreight, activeSavedDocForInstallment)}>
+        Abrir comprovante para conferência
+      </button>
+      {activeReceiptIsScheduled && <label className="flex items-center gap-2">
+        <input type="checkbox" checked={acknowledgeScheduledProof} onChange={event => setAcknowledgeScheduledProof(event.target.checked)} />
+        Conferi a liquidação do agendamento no extrato bancário.
+      </label>}
+    </div>
+  );
 
   return (
     <div className={`rv-finance space-y-4 relative rv-finance-mode-${financialLayout}`}>
@@ -1702,7 +1723,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                               </span>
                             ))}
 
-                          {isAguardandoEntrega && (
+                          {isAguardandoEntrega && !CLOUD_MODE && (
                             <div className="flex flex-col items-center gap-1.5">
                               <button
                                 type="button"
@@ -1723,7 +1744,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                             </div>
                           )}
 
-                          {isAdiantPagoOrSaldo &&
+                          {isAdiantPagoOrSaldo && (!CLOUD_MODE || frete.entregaConfirmada) &&
                             (canExecutePayment ? (
                               <button
                                 type="button"
@@ -1904,7 +1925,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                       Realizar Pagamento
                     </button>
                   )}
-                  {(isAdiantPagoOrSaldo || isAguardandoEntrega) && !frete.entregaConfirmada && (
+                  {!CLOUD_MODE && (isAdiantPagoOrSaldo || isAguardandoEntrega) && !frete.entregaConfirmada && (
                     <button
                       type="button"
                       onClick={() => handleConfirmDelivery(frete)}
@@ -1913,7 +1934,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                       Confirmar Entrega
                     </button>
                   )}
-                  {(isAdiantPagoOrSaldo || isAguardandoEntrega) && canExecutePayment && (
+                  {(isAdiantPagoOrSaldo || isAguardandoEntrega) && canExecutePayment && (!CLOUD_MODE || frete.entregaConfirmada) && (
                     <button
                       type="button"
                       onClick={() => openPaymentModal(frete, 'SALDO')}
@@ -2650,7 +2671,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                           )}
                         </span>
                         <span className="tabular-nums">
-                          Adiantamento ({paymentModalFreight.percentualAdiantamento}%) -{' '}
+                          {paymentModalFreight.regraTipo === 'INTEGRAL_100' ? 'Pagamento Integral' : 'Adiantamento'} ({paymentModalFreight.percentualAdiantamento}%) -{' '}
                           {formatCurrencyBRL(paymentModalFreight.valorAdiantamento)}
                         </span>
                       </button>
@@ -2659,7 +2680,8 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                       {paymentModalFreight.percentualSaldo > 0 && (
                         <button
                           type="button"
-                          onClick={() => handleSelectInstallmentMode('SALDO')}
+                          disabled={balanceLocked}
+                    onClick={() => handleSelectInstallmentMode('SALDO')}
                           className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2.5 transition cursor-pointer ${
                             paymentStepMode === 'SALDO'
                               ? 'bg-[#161920] text-[#FACC15] shadow-md ring-2 ring-[#FACC15]/40'
@@ -2795,7 +2817,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                     >
                       {copiedValue
                         ? `✅ Valor Copiado (${formatCurrencyBRL(activeModalAmount)})`
-                        : `Copiar Valor de ${paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} (${formatCurrencyBRL(activeModalAmount)})`}
+                        : `Copiar Valor de ${activeInstallmentLabel} (${formatCurrencyBRL(activeModalAmount)})`}
                     </button>
                   </div>
                 </div>
@@ -2810,7 +2832,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                       <p className="text-[11px] text-gray-500">
                         Parcela selecionada:{' '}
                         <strong>
-                          {paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} —{' '}
+                          {activeInstallmentLabel} —{' '}
                           {formatCurrencyBRL(activeModalAmount)}
                         </strong>
                       </p>
@@ -2870,7 +2892,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                       Anexar PDF ou imagem ({activeReceiptTitle})
                     </p>
                     <p className="text-[11px] text-gray-500 mt-0.5">
-                      Aceita PDF, JPEG ou PNG (máx. 10 MB)
+                      Aceita PDF, JPEG ou PNG (máx. {CLOUD_MODE ? 3 : 10} MB)
                     </p>
                   </div>
 
@@ -2933,7 +2955,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                       <span>
                         Nenhum arquivo vinculado à parcela{' '}
                         <strong>
-                          {paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'}
+                          {activeInstallmentLabel}
                         </strong>
                         .
                       </span>
@@ -2954,7 +2976,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                   {/* Input de Observações / Código da Transação */}
                   <div>
                     <label className="block text-xs font-bold text-[#15191D] mb-1">
-                      Observações / Código da Transação ({paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'})
+                      Observações / Código da Transação ({activeInstallmentLabel})
                     </label>
                     <input
                       type="text"
@@ -2986,10 +3008,11 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                             Aguardando conferência
                           </span>
                         </div>
+                        {receiptReview}
                         {canUserConfirmSettlement ? (
                           <button
                             type="button"
-                            disabled={isConfirmingSettlement}
+                            disabled={isConfirmingSettlement || (activeReceiptIsScheduled && !acknowledgeScheduledProof)}
                             onClick={() => void handleConfirmInstallmentSettlement()}
                             className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer"
                           >
@@ -3000,7 +3023,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                             )}
                             <span>
                               Confirmar Liquidação de{' '}
-                              {paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'} (
+                              {activeInstallmentLabel} (
                               {formatCurrencyBRL(activeModalAmount)})
                             </span>
                           </button>
@@ -3115,7 +3138,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                     )}
                   </span>
                   <span className="tabular-nums">
-                    Adiantamento ({paymentModalFreight.percentualAdiantamento}%) -{' '}
+                    {paymentModalFreight.regraTipo === 'INTEGRAL_100' ? 'Pagamento Integral' : 'Adiantamento'} ({paymentModalFreight.percentualAdiantamento}%) -{' '}
                     {formatCurrencyBRL(paymentModalFreight.valorAdiantamento)}
                   </span>
                 </button>
@@ -3123,6 +3146,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                 {paymentModalFreight.percentualSaldo > 0 && (
                   <button
                     type="button"
+                    disabled={balanceLocked}
                     onClick={() => handleSelectInstallmentMode('SALDO')}
                     className={`flex items-center gap-2.5 text-left text-sm font-bold p-2 rounded-xl transition cursor-pointer ${
                       paymentStepMode === 'SALDO'
@@ -3339,12 +3363,13 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
             </button>
 
             {/* Confirmação de Liquidação Separada (Requirement 6) */}
+            {activeVerificationStatus === 'AGUARDANDO_CONFERENCIA' && receiptReview}
             {activeSavedDocForInstallment &&
               activeVerificationStatus !== 'PAGAMENTO_CONFIRMADO' &&
               canUserConfirmSettlement && (
                 <button
                   type="button"
-                  disabled={isConfirmingSettlement}
+                  disabled={isConfirmingSettlement || (activeReceiptIsScheduled && !acknowledgeScheduledProof)}
                   onClick={() => void handleConfirmInstallmentSettlement()}
                   className="w-full py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-[#080B0D] font-black text-xs uppercase shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
@@ -3354,7 +3379,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
                     <UserCheck className="w-4 h-4" />
                   )}
                   <span>
-                    Confirmar Liquidação ({paymentStepMode === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'})
+                    Confirmar Liquidação ({activeInstallmentLabel})
                   </span>
                 </button>
               )}
@@ -3551,7 +3576,7 @@ export const FinanceiroFretesView: React.FC<FinanceiroFretesViewProps> = ({
         {detailTab==='Documentos' && <div className="rv-detail-docs">{Object.values(selectedOrderDetails.docs).filter(Boolean).map(doc=><button key={doc!.id} onClick={()=>handleOpenDocPreview(selectedOrderDetails,doc!)}><FileText size={18}/>{doc!.label} · {doc!.fileName}<Download size={16}/></button>)}{selectedOrderDetails.comprovantesList?.map(receipt=><button key={receipt.id} onClick={()=>void handleOpenHistoricalReceipt(selectedOrderDetails,receipt)}><FileText size={18}/><span>{receipt.title} · {receipt.originalFileName}<small className="block">{receipt.serverCreatedAtFormatted} · {receipt.verificationStatus}</small></span><Download size={16}/></button>)}{!Object.values(selectedOrderDetails.docs).some(Boolean) && !selectedOrderDetails.comprovantesList?.length && <p>Nenhum documento vinculado.</p>}</div>}
         {detailTab==='Histórico' && <div>{selectedOrderDetails.historicoPagamentos?.length ? selectedOrderDetails.historicoPagamentos.map((entry,index)=><article className="rv-history-entry" key={entry.id || index}><strong>{entry.summary}</strong><p>{entry.timestampFormatted} · {entry.actorName}</p><p>{entry.installmentType === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'}{entry.amountBRL !== undefined ? ' · ' + formatProtectedCurrency(entry.amountBRL) : ''}</p></article>) : <p>Nenhum evento de pagamento registrado.</p>}</div>}
         {detailTab==='Observações' && <p className="whitespace-pre-wrap">{selectedOrderDetails.observacoes || 'Sem observações registradas.'}</p>}
-        <div className="rv-detail-actions"><button className="rv-button-dark" onClick={()=>setShowFullOrder(true)}>Ordem completa e impressão</button>{canExecutePayment && !selectedOrderDetails.adiantamentoPago && <button className="rv-button-dark" onClick={()=>openPaymentModal(selectedOrderDetails,'ADIANTAMENTO')}>Abrir pagamento do adiantamento</button>}{canExecutePayment && selectedOrderDetails.adiantamentoPago && !selectedOrderDetails.saldoPago && <button className="rv-button-dark" onClick={()=>openPaymentModal(selectedOrderDetails,'SALDO')}>Abrir pagamento do saldo</button>}</div>
+        <div className="rv-detail-actions"><button className="rv-button-dark" onClick={()=>setShowFullOrder(true)}>Ordem completa e impressão</button>{canExecutePayment && !selectedOrderDetails.adiantamentoPago && <button className="rv-button-dark" onClick={()=>openPaymentModal(selectedOrderDetails,'ADIANTAMENTO')}>{selectedOrderDetails.regraTipo === 'INTEGRAL_100' ? 'Abrir pagamento integral' : 'Abrir pagamento do adiantamento'}</button>}{canExecutePayment && selectedOrderDetails.adiantamentoPago && !selectedOrderDetails.saldoPago && (!CLOUD_MODE || selectedOrderDetails.entregaConfirmada) && <button className="rv-button-dark" onClick={()=>openPaymentModal(selectedOrderDetails,'SALDO')}>Abrir pagamento do saldo</button>}</div>
       </section></div>}
       {selectedOrderDetails && showFullOrder && (
         <FreightOrderDetailsModal

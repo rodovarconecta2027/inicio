@@ -4,7 +4,7 @@ import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { registerAgenda } from '../agenda.js';
 import { registerMural } from '../mural.js';
 import { readPrivateFile, writePrivateFiles } from './freightFiles.js';
-import type { RequestAttachment } from '../../types';
+import type { PaymentReceiptRecord, RequestAttachment } from '../../types';
 import { registerRequestQueue } from '../requestQueue.js';
 import { registerPolls } from '../muralPolls.js';
 import { registerExternalRh, canAccessExternalRh } from '../externalRh.js';
@@ -30,7 +30,7 @@ export async function cloudDirectory(db: Firestore, tx?: Transaction) {
 
 /** Preserve each module's handlers and permissions; replace only its persistence boundary.
  * State documents are bounded to avoid Firestore's 1 MiB limit. Overflow is an explicit
- * error, not a partial save. Binary attachments remain blocked pending durable storage.
+ * error, not a partial save. Supported binaries use the private transactional file store.
  */
 export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, db: Firestore) {
   const adminGuard = (req: any, res: any, next: any) => req.sessionUser.accessLevel === 'ADMINISTRADOR'
@@ -145,7 +145,9 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
         if (module.page && !hasPagePermission(req.sessionUser, module.page)) { res.status(403).json({ error: 'Módulo não autorizado.' }); return; }
         if (route.path.endsWith('/import')) { res.status(403).json({ error: 'Importação de dados locais desabilitada na homologação.' }); return; }
         if (module.name === 'rh-external' && !canAccessExternalRh(req.sessionUser)) { res.status(403).json({ error: 'Acesso exclusivo ao RH.' }); return; }
-        if ((module.name === 'rh-external' && route.path.includes('/documents')) || (module.name !== 'requests' && route.path.includes('/attachments/')) || /\/(comprovantes|shared-staging)(\/|$)/.test(route.path) || route.path.endsWith('/document') || (module.name !== 'requests' && JSON.stringify(req.body || {}).includes('data:'))) {
+        const receiptUpload = module.name === 'finance' && route.path === '/api/pagamentos/comprovantes';
+        if (receiptUpload && !req.is('application/json')) { res.status(415).json({ error: 'Use o envio de comprovantes pela interface do Financeiro.' }); return; }
+        if ((module.name === 'rh-external' && route.path.includes('/documents')) || (module.name !== 'requests' && route.path.includes('/attachments/')) || /\/shared-staging(\/|$)/.test(route.path) || route.path.endsWith('/document') || (module.name !== 'requests' && !receiptUpload && JSON.stringify(req.body || {}).includes('data:'))) {
           res.status(503).json({ error: 'Armazenamento de anexos ainda não configurado. Nenhuma alteração foi salva.', code: 'STORAGE_NOT_CONFIGURED' }); return;
         }
         const mutation = req.method !== 'GET', rawKey = String(req.headers['x-idempotency-key'] || '');
@@ -167,12 +169,19 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           const ref = db.collection('portal_modules').doc(module.name), snapshot = await tx.get(ref);
           const state: any = snapshot.exists ? snapshot.data()! : module.initial();
           const before = JSON.stringify(state);
+          const blockedFinancialFreights = new Set<string>();
           if (module.name === 'finance') {
             const freights = await tx.get(db.collection('freight_operations').limit(501));
             if (freights.size > 500) fail('Consulta financeira excedeu o limite da homologação.');
             for (const freight of freights.docs) {
               const index = state.freights.findIndex((f: any) => f.id === freight.id);
-              const projected = financialProjection(freight.data() as any, state.freights[index]);
+              const operational = financialProjection(freight.data() as any, undefined, true);
+              const existing = state.freights[index];
+              if (!operational || (existing && (existing.valorTotal !== operational.valorTotal ||
+                  existing.valorAdiantamento !== operational.valorAdiantamento || existing.valorSaldo !== operational.valorSaldo))) {
+                blockedFinancialFreights.add(freight.id);
+              }
+              const projected = operational && (existing ? financialProjection(freight.data() as any, existing, true) : operational);
               if (projected) { if (index < 0) state.freights.push(projected); else state.freights[index] = projected; }
             }
           }
@@ -180,7 +189,19 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           let status = 200, response: any;
           const out: any = { setHeader() {}, status(n: number) { status = n; return out; }, json(body: any) { response = { status, body: clean(body) }; return out; } };
           let upload: { recordId: string; name: string; bytes: Buffer } | undefined;
+          const readReceipt = (receipt: PaymentReceiptRecord) => readPrivateFile(tx, db, {
+            freightId: receipt.freightId, storageName: receipt.storageFileName,
+            sizeBytes: receipt.sizeBytes, mimeType: receipt.mimeType,
+          });
           const request = {
+            isPaymentFreightBlocked: (freightId: string) => blockedFinancialFreights.has(freightId),
+            savePaymentReceipt(receipt: PaymentReceiptRecord, bytes: Buffer) {
+              upload = { recordId: receipt.freightId, name: receipt.storageFileName, bytes };
+            },
+            readPaymentReceipt: readReceipt,
+            async sendPaymentReceipt(receipt: PaymentReceiptRecord) {
+              response = { file: await readReceipt(receipt), fileName: receipt.originalFileName, mimeType: receipt.mimeType };
+            },
             saveRequestAttachment(recordId: string, attachment: RequestAttachment, bytes: Buffer) {
               upload = { recordId, name: 'rdoc-' + attachment.id, bytes };
             },

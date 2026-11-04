@@ -23,7 +23,7 @@ export function validateFreightUpload(dataUrl: unknown) {
 }
 
 function fileRef(db: Firestore, name: string) {
-  if (typeof name !== 'string' || !/^(?:fdoc|rdoc)-[A-Za-z0-9_.-]{1,200}$/.test(name)) return fail('Arquivo privado indisponível.', 404);
+  if (typeof name !== 'string' || !/^(?:fdoc|rdoc|pdoc)-[A-Za-z0-9_.-]{1,200}$/.test(name)) return fail('Arquivo privado indisponível.', 404);
   return db.collection('freight_private_files').doc(name);
 }
 

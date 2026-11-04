@@ -1,4 +1,6 @@
 import { portalFetch as fetch, CLOUD_MODE } from '../lib/apiTransport';
+import { PREVIEW_FREIGHT_FILE_LIMIT } from '../lib/freightFileLimits';
+import { getAuthHeaders } from '../lib/serverApi';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -101,7 +103,7 @@ export const ReceberComprovanteModal: React.FC<ReceberComprovanteModalProps> = (
     async function fetchUserIntents() {
       try {
         const res = await fetch('/api/pagamentos/intencoes', {
-          credentials: 'include',
+          credentials: 'include', headers: getAuthHeaders(),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -200,8 +202,8 @@ export const ReceberComprovanteModal: React.FC<ReceberComprovanteModalProps> = (
     e.target.value = '';
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage('O arquivo excede o tamanho máximo permitido de 10 MB.');
+    if (file.size > (CLOUD_MODE ? PREVIEW_FREIGHT_FILE_LIMIT : 10 * 1024 * 1024)) {
+      setErrorMessage('O arquivo excede o tamanho máximo permitido de ' + (CLOUD_MODE ? '3 MB.' : '10 MB.'));
       return;
     }
 
@@ -331,6 +333,11 @@ trailer << /Root 1 0 R >>
       return;
     }
 
+    if (CLOUD_MODE && (draft.sizeBytes || 0) > PREVIEW_FREIGHT_FILE_LIMIT) {
+      setErrorMessage('O comprovante excede o limite de 3 MB da homologação.');
+      return;
+    }
+
     setErrorMessage(null);
     setStatusNotice(null);
 
@@ -366,10 +373,7 @@ trailer << /Root 1 0 R >>
     try {
       const res = await fetch('/api/pagamentos/comprovantes', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Idempotency-Key': idempotencyKey,
-        },
+        headers: getAuthHeaders({ 'X-Idempotency-Key': idempotencyKey }),
         credentials: 'include',
         body: JSON.stringify({
           freightId: selectedFreight.id,
@@ -442,7 +446,7 @@ trailer << /Root 1 0 R >>
     try {
       const res = await fetch(`/api/pagamentos/comprovantes/${savedReceipt.id}/confirmar`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         credentials: 'include',
         body: JSON.stringify({
           transactionCode: transactionCode.trim() || savedReceipt.transactionCode,
@@ -711,6 +715,7 @@ trailer << /Root 1 0 R >>
                       onChange={(e) => {
                         setSelectedFreightId(e.target.value);
                         setSelectedIntentId('');
+                        setSelectedInstallment('ADIANTAMENTO');
                       }}
                       className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#FFD400]"
                     >
@@ -740,6 +745,7 @@ trailer << /Root 1 0 R >>
                           <button
                             key={inst}
                             type="button"
+                            disabled={CLOUD_MODE && inst === 'SALDO' && (!selectedFreight?.entregaConfirmada || !selectedFreight.adiantamentoPago || instValue <= 0)}
                             onClick={() => setSelectedInstallment(inst)}
                             className={`px-3 py-2 rounded-xl border-2 text-left transition-all ${
                               isSelected
@@ -749,7 +755,7 @@ trailer << /Root 1 0 R >>
                           >
                             <div className="flex items-center justify-between">
                               <span className="text-[11px] font-black uppercase">
-                                {inst === 'ADIANTAMENTO' ? 'Adiantamento' : 'Saldo'}
+                                {inst === 'SALDO' ? 'Saldo' : selectedFreight?.regraTipo === 'INTEGRAL_100' ? 'Pagamento Integral' : 'Adiantamento'}
                               </span>
                               <span
                                 className={`w-2 h-2 rounded-full ${
@@ -851,7 +857,7 @@ trailer << /Root 1 0 R >>
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs font-extrabold text-slate-900">
-                        Anexe o comprovante bancário em PDF, JPEG ou PNG (máx. 10 MB)
+                        Anexe o comprovante bancário em PDF, JPEG ou PNG (máx. {CLOUD_MODE ? 3 : 10} MB)
                       </p>
                       <p className="text-[11px] text-slate-500">
                         Compatível com compartilhamento direto no Android ou seleção manual em

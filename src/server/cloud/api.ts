@@ -23,7 +23,8 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   app.use((req, res, next) => {
     const attachment = req.method === 'POST' && /^\/api\/cloud\/meus-fretes\/[A-Za-z0-9_-]+\/attachments$/.test(req.path);
     const requestAttachment = req.method === 'POST' && /^\/api\/cloud\/requests(?:\/[A-Za-z0-9_-]+\/response)?$/.test(req.path);
-    (attachment || requestAttachment ? attachmentJson : standardJson)(req, res, next);
+    const paymentReceipt = req.method === 'POST' && req.path === '/api/cloud/pagamentos/comprovantes';
+    (attachment || requestAttachment || paymentReceipt ? attachmentJson : standardJson)(req, res, next);
   });
   app.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
