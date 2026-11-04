@@ -48,6 +48,7 @@ import {
   apiTransferFreightResponsibility,
   apiUpdateOperationalData,
   apiUploadFreightAttachment,
+  freightAttachmentLimitMb,
   apiVerifyFreightAttachment,
   formatCentavosToBrl,
   FreightOperatorOption,
@@ -1165,8 +1166,8 @@ export const MeusFretesExpedicaoView: React.FC<MeusFretesExpedicaoViewProps> = (
   const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedFreight) return;
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMsg('O arquivo excede o limite de 10 MB.');
+    if (file.size > freightAttachmentLimitMb * 1024 * 1024) {
+      setErrorMsg('O arquivo excede o limite de ' + freightAttachmentLimitMb + ' MB.');
       return;
     }
 

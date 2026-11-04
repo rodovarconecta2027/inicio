@@ -24,6 +24,7 @@ import {
   apiDeleteFreightAttachment,
   apiDownloadFreightAttachment,
   apiUploadFreightAttachment,
+  freightAttachmentLimitMb,
   apiVerifyFreightAttachment,
 } from '../lib/serverApi';
 import { canViewFreightTeam } from '../lib/permissions';
@@ -107,11 +108,11 @@ export const FreightDocumentsManager: React.FC<FreightDocumentsManagerProps> = (
     const newItems: QueuedFile[] = [];
     for (let i = 0; i < fileList.length; i++) {
       const f = fileList[i];
-      // Max 10MB per file check
-      if (f.size > 10 * 1024 * 1024) {
+      // Use the limit of the current backend.
+      if (f.size > freightAttachmentLimitMb * 1024 * 1024) {
         setFeedback({
           type: 'error',
-          message: `O arquivo "${f.name}" excede o limite máximo de 10 MB.`,
+          message: `O arquivo "${f.name}" excede o limite máximo de ${freightAttachmentLimitMb} MB.`,
         });
         continue;
       }
@@ -309,7 +310,7 @@ export const FreightDocumentsManager: React.FC<FreightDocumentsManagerProps> = (
               Adicionar Documentos do Frete
             </span>
             <p className="text-[11px] text-slate-500">
-              Selecione múltiplos arquivos (PDF, imagens) de até 10 MB cada. Adicione à fila sem fechar a janela.
+              Selecione múltiplos arquivos (PDF, imagens) de até {freightAttachmentLimitMb} MB cada. Adicione à fila sem fechar a janela.
             </p>
           </div>
 

@@ -3989,10 +3989,12 @@ export function registerUnifiedFreightRoutes(
         ? category
         : 'OUTRO';
 
-      ensureDirectories();
       const storageName = `fdoc-${freight.id}-${crypto.randomUUID()}.${validation.extension}`;
-      const diskPath = path.join(FREIGHT_ATTACHMENTS_DIR, storageName);
-      fs.writeFileSync(diskPath, fileBuf);
+      if (options.remote) req.saveAttachment(storageName, fileBuf);
+      else {
+        ensureDirectories();
+        fs.writeFileSync(path.join(FREIGHT_ATTACHMENTS_DIR, storageName), fileBuf);
+      }
 
       const sp = formatSaoPauloDateTime();
       const sizeKb = Math.max(1, Math.round(fileBuf.length / 1024));
@@ -4207,7 +4209,7 @@ export function registerUnifiedFreightRoutes(
       }
 
       const att = sub.anexos[attIdx];
-      try {
+      if (!options.remote) try {
         const diskPath = path.join(FREIGHT_ATTACHMENTS_DIR, path.basename(att.storageName));
         if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
       } catch {
@@ -4268,7 +4270,7 @@ export function registerUnifiedFreightRoutes(
       const sub = engineState().freightSubDocs.get(freight.id)!;
       const count = sub.anexos.length;
 
-      for (const att of sub.anexos) {
+      for (const att of options.remote ? [] : sub.anexos) {
         try {
           const diskPath = path.join(FREIGHT_ATTACHMENTS_DIR, path.basename(att.storageName));
           if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);

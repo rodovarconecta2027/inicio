@@ -17,7 +17,12 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   const { auth, db } = runtime;
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '100kb' }));
+  const standardJson = express.json({ limit: '100kb' });
+  const attachmentJson = express.json({ limit: '4200kb', inflate: false });
+  app.use((req, res, next) => {
+    const attachment = req.method === 'POST' && /^\/api\/cloud\/meus-fretes\/[A-Za-z0-9_-]+\/attachments$/.test(req.path);
+    (attachment ? attachmentJson : standardJson)(req, res, next);
+  });
   app.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -90,7 +95,7 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   });
   app.use((_req, res) => res.status(404).json({ error: 'Operação fora do adaptador de migração.', code: 'CLOUD_ROUTE_NOT_FOUND' }));
   app.use((error: any, _req: any, res: any, _next: any) => {
-    const status = [400, 401, 403, 404, 409, 429].includes(error.status) ? error.status : 503;
+    const status = [400, 401, 403, 404, 409, 413, 415, 429].includes(error.status) ? error.status : 503;
     if (status === 503) console.error('cloud_api_failure', { code: String(error?.code || 'UNAVAILABLE').slice(0, 80) });
     res.status(status).json({ authenticated: false, error: status === 503 ? 'Serviço temporariamente indisponível. Tente novamente.' : error.message,
       ...(error.code && status !== 503 ? { code: error.code } : {}),

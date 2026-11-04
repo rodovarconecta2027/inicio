@@ -15,5 +15,11 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "freight_file_parts",
+      "fieldPath": "bytes",
+      "indexes": []
+    }
+  ]
 }

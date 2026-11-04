@@ -1,4 +1,5 @@
 import { portalFetch as fetch } from './apiTransport';
+import { PREVIEW_FREIGHT_FILE_LIMIT } from './freightFileLimits';
 import {newRequestKey} from './requestKey';
 import {
   AccessDecisionRecord,
@@ -21,6 +22,8 @@ import {
 const cloudAuth = (import.meta as any).env?.VITE_CLOUD_AUTH === 'true';
 const authUrl = (path: string) => cloudAuth ? path.replace('/api/auth/', '/api/cloud/auth/') : path;
 const tokenStorageKey = cloudAuth ? 'rodovar_cloud_security_tokens_v1' : 'rodovar_security_tokens_v2';
+
+export const freightAttachmentLimitMb = cloudAuth ? PREVIEW_FREIGHT_FILE_LIMIT / (1024 * 1024) : 5;
 
 export const DEFAULT_NEUTRAL_AVATAR_URL = '/assets/default-avatar.png';
 

@@ -1,0 +1,1 @@
+export const PREVIEW_FREIGHT_FILE_LIMIT = 3 * 1024 * 1024;

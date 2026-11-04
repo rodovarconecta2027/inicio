@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { jsPDF } from 'jspdf';
 import { firebaseTestRuntime } from '../src/server/firebase-test/runtime';
 import { createCloudApi } from '../src/server/cloud/api';
 import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
@@ -60,9 +61,32 @@ export async function verifyRemoteModules(adminSession: { sessionId: string; csr
       f = (await call('mon', `/meus-fretes/${f.id}/monitoramento-action`, { action: 'AVANCAR_ETAPA', targetStage, baseRevision: f.revision })).freight;
     }
     await call('mon', `/meus-fretes/${f.id}/monitoramento-action`, { action: 'AVANCAR_ETAPA', targetStage: 'FINALIZADO', baseRevision: f.revision }, 'POST', 400);
-    // Explicit emulator-only proof fixture: binary storage itself is not configured remotely.
-    const detailsRef = runtime.db.collection('freight_details').doc(f.id);
-    await detailsRef.update({ anexos: [{ id: 'TESTE-proof', category: 'COMPROVANTE_ENTREGA', conferido: true, name: 'TESTE-sem-arquivo-real.pdf' }] });
+
+    const document = new jsPDF();
+    document.text('TESTE: comprovante de entrega fictício', 10, 15);
+    const pdf = Buffer.concat([Buffer.from(document.output('arraybuffer')), Buffer.from(('% Arquivo de teste de integracao\n').repeat(19000))]);
+    const uploadPath = '/meus-fretes/' + f.id + '/attachments';
+    const proofUpload = { category: 'COMPROVANTE_ENTREGA', fileName: 'comprovante-teste.pdf', dataUrl: 'data:application/pdf;base64,' + pdf.toString('base64') };
+    await call('rh', uploadPath, proofUpload, 'POST', 403);
+    await call('mon', uploadPath, { ...proofUpload, dataUrl: 'data:application/pdf;base64,' + Buffer.from('<html>invalido</html>').toString('base64') }, 'POST', 400);
+    const uploadKey = crypto.randomUUID();
+    const uploaded = await call('mon', uploadPath, proofUpload, 'POST', 201, uploadKey);
+    assert.equal((await call('mon', uploadPath, proofUpload, 'POST', 201, uploadKey)).attachment.id, uploaded.attachment.id);
+    assert.equal(uploaded.attachment.conferido, false);
+    f = uploaded.freight;
+    const proofPath = uploadPath + '/' + uploaded.attachment.id;
+    await call('rh', proofPath + '/download', undefined, 'GET', 403);
+    const readFile = () => fetch(base + proofPath + '/download', { headers: { 'X-Rodovar-Session': actors.mon.sessionId } });
+    const download = await readFile();
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get('content-type'), 'application/pdf');
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdf);
+    await call('mon', '/meus-fretes/' + f.id + '/monitoramento-action', { action: 'AVANCAR_ETAPA', targetStage: 'FINALIZADO', baseRevision: f.revision }, 'POST', 400);
+    f = (await call('mon', proofPath + '/verify', { conferido: true })).freight;
+    const temporary = await call('mon', uploadPath, { ...proofUpload, category: 'OUTRO' }, 'POST', 201);
+    f = (await call('mon', uploadPath + '/' + temporary.attachment.id, undefined, 'DELETE')).freight;
+    await call('mon', uploadPath + '/' + temporary.attachment.id + '/download', undefined, 'GET', 404);
+    assert.equal((await runtime.db.collection('system_settings').doc('freight_file_usage').get()).data()?.bytes, pdf.length);
     f = (await call('mon', `/meus-fretes/${f.id}/monitoramento-action`, { action: 'AVANCAR_ETAPA', targetStage: 'FINALIZADO', baseRevision: f.revision })).freight;
     assert.equal(f.situacaoMonitoramento, 'FINALIZADO');
     assert.equal((await call('fin', '/pagamentos/fretes')).freights.find((r: any) => r.id === f.id).adiantamentoPago, false);
@@ -105,6 +129,7 @@ export async function verifyRemoteModules(adminSession: { sessionId: string; csr
     await new Promise<void>(r => server.close(() => r())); server = await start();
     base = `http://127.0.0.1:${(server.address() as any).port}/api/cloud`;
     assert.equal((await call('mon', `/meus-fretes/${f.id}`)).freight.id, f.id);
+    assert.deepEqual(Buffer.from(await (await readFile()).arrayBuffer()), pdf);
     assert.equal((await call('mon', '/requests')).requests.find((r: any) => r.id === request.id).status, 'Concluída');
     assert.equal((await call('other', `/chat/conversations/${group.id}/messages`))[0].text, 'Mensagem de teste persistida');
     const exportPath = '/admin/backups/operations/export';

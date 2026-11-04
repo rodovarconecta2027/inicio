@@ -2,8 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import crypto from 'node:crypto';
 import type { Express, RequestHandler } from 'express';
 import type { Firestore } from 'firebase-admin/firestore';
-import type { Employee } from '../../types';
-import { emptyFreightEngineState, registerUnifiedFreightRoutes, withFreightEngineState } from '../unifiedFreightEngine.js';
+import { canViewFreightTeam } from '../../lib/permissions.js';
+import { readFreightFile, validateFreightUpload, writeFreightFiles } from './freightFiles.js';
+import type { Employee, UnifiedFreightAttachment, UnifiedFreightRecord } from '../../types';
+import { canUserAccessFreightRecord, emptyFreightEngineState, registerUnifiedFreightRoutes, withFreightEngineState } from '../unifiedFreightEngine.js';
 
 const fail = (message: string, status = 503): never => { throw Object.assign(Error(message), { status }); };
 const clean = (value: unknown) => JSON.parse(JSON.stringify(value));
@@ -30,10 +32,11 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
 
   for (const route of captured) (app as any)[route.method](route.path.replace('/api/', '/api/cloud/'), guard, async (req: any, res: any, next: any) => {
     try {
-      // Binary storage is not configured on Spark. Never write ephemeral Vercel disk.
-      if (route.path.includes('/attachments') && (route.method !== 'post' || !route.path.endsWith('/verify'))) {
-        res.status(503).json({ error: 'Armazenamento de anexos ainda não configurado na homologação. Nenhum arquivo foi alterado.', code: 'STORAGE_NOT_CONFIGURED' }); return;
-      }
+      const attachmentRoute = route.path.includes('/attachments');
+      const upload = attachmentRoute && route.method === 'post' && route.path.endsWith('/attachments');
+      const download = attachmentRoute && route.method === 'get';
+      const verifying = attachmentRoute && route.path.endsWith('/verify');
+      if (upload) validateFreightUpload(req.body?.dataUrl);
       const mutation = req.method !== 'GET';
       const rawKey = String(req.headers['x-idempotency-key'] || req.body?.idempotencyKey || '');
       if (mutation && !/^[A-Za-z0-9_-]{1,128}$/.test(rawKey)) { res.status(400).json({ error: 'Identificador de envio obrigatório. Atualize a página e tente novamente.', code: 'IDEMPOTENCY_REQUIRED' }); return; }
@@ -44,6 +47,29 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
         if (!actor?.active || actor.approvalStatus !== 'APROVADO') fail('Conta sem acesso autorizado.', 403);
         const security = (await tx.get(db.collection('system_settings').doc('security'))).data();
         if (actor!.accessLevel === 'ADMINISTRADOR' && security?.protectedAdminUid !== req.sessionUser.id) fail('Administrador não autorizado.', 403);
+        const uid = req.sessionUser.id;
+        if (download) {
+          const { freightId, attId } = req.params;
+          const [record, details] = await tx.getAll(db.collection('freight_operations').doc(freightId), db.collection('freight_details').doc(freightId));
+          const freight = record.data() as UnifiedFreightRecord | undefined;
+          const user = { ...req.sessionUser, ...actor, id: uid } as Employee;
+          if (!freight) return fail('Frete não encontrado.', 404);
+          const unclaimed = freight.expedicaoResponsavelId === null && freight.comercialResponsavelId !== uid &&
+            freight.monitoramentoResponsavelId !== uid && !canViewFreightTeam(user);
+          if (!canUserAccessFreightRecord(freight, user) || unclaimed) return fail('Sem permissão para baixar documentos deste frete.', 403);
+          const att = (details.data()?.anexos as UnifiedFreightAttachment[] | undefined)?.find(item => item.id === attId);
+          if (!att || att.freightId !== freightId) return fail('Anexo não encontrado.', 404);
+          const file = await readFreightFile(tx, db, att);
+          return { file, mimeType: att.mimeType, fileName: att.fileName };
+        }
+        if (attachmentRoute) {
+          const { freightId } = req.params;
+          const freight = (await tx.get(db.collection('freight_operations').doc(freightId))).data() as UnifiedFreightRecord | undefined;
+          if (!freight) return fail('Frete não encontrado.', 404);
+          if (!canUserAccessFreightRecord(freight, { ...req.sessionUser, ...actor, id: uid } as Employee)) {
+            return fail('Sem permissão para alterar documentos deste frete.', 403);
+          }
+        }
         if (mutation) {
           const previous = await tx.get(keyRef);
           if (previous.exists) {
@@ -69,16 +95,43 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
           .filter(u => u.accessLevel !== 'ADMINISTRADOR' || u.id === security?.protectedAdminUid);
         const transactionUser = users.find(u => u.id === req.sessionUser.id);
         if (!transactionUser) fail('Perfil profissional indisponível.', 403);
+        const freightId = req.params.freightId;
+        const beforeFiles = attachmentRoute ? [...(state.freightSubDocs.get(freightId)?.anexos || [])] : [];
+        if (upload) {
+          const freight = state.freightsIndex.get(freightId);
+          if (freight && transactionUser!.accessLevel !== 'ADMINISTRADOR' &&
+              ![freight.comercialResponsavelId, freight.expedicaoResponsavelId, freight.monitoramentoResponsavelId].includes(uid)) {
+            return fail('Somente os responsáveis podem anexar documentos a este frete.', 403);
+          }
+        }
         const audits: any[] = [];
+        let fileToSave: { name: string; bytes: Buffer } | undefined;
         let response: { status: number; body: any } | undefined;
         let status = 200;
         const output: any = { status(code: number) { status = code; return output; }, json(body: any) { response = { status, body: clean(body) }; return output; } };
         await context.run({ users, audits, drivers: [...snapshots[5].docs.map(d => d.data()), ...(driverState.data()?.drivers || [])] }, () => withFreightEngineState(state, () => route.handler({
           body: req.body, params: req.params, query: req.query, headers: req.headers, method: req.method,
           path: req.path, ip: req.ip, sessionUser: transactionUser,
+          saveAttachment: (name: string, bytes: Buffer) => { fileToSave = { name, bytes }; },
         }, output)));
         if (!response) fail('A operação não retornou uma resposta válida.');
         if (mutation && response!.status < 400) {
+          if (route.path.endsWith('/monitoramento-action') && req.body?.targetStage === 'FINALIZADO') {
+            const completed = state.freightsIndex.get(freightId);
+            const proof = state.freightSubDocs.get(freightId)?.anexos.find(att => att.id === completed?.comprovanteEntregaAnexoId);
+            if (!proof) return fail('Comprovante de entrega indisponível.', 409);
+            await readFreightFile(tx, db, proof);
+          }
+          if (verifying && req.body?.conferido !== false) {
+            const attachment = beforeFiles.find(att => att.id === req.params.attId);
+            if (!attachment) return fail('Anexo não encontrado.', 404);
+            await readFreightFile(tx, db, attachment);
+          }
+          if (attachmentRoute) {
+            const retained = new Set(state.freightSubDocs.get(freightId)?.anexos.map(att => att.id));
+            const removed = beforeFiles.filter(att => !retained.has(att.id));
+            await writeFreightFiles(tx, db, freightId, fileToSave, removed);
+          }
           const desired = [state.freightsIndex, state.freightSubDocs, new Map(state.serverNotifications.map(n => [n.id, n]))];
           for (const [i, snapshotIndex] of [0, 1, 4].entries()) {
             const old = new Map(snapshots[snapshotIndex].docs.map(d => [d.id, JSON.stringify(d.data())]));
@@ -95,6 +148,13 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
         }
         return response!;
       });
+      if ('file' in result) {
+        res.attachment(result.fileName);
+        res.setHeader('Content-Type', result.mimeType);
+        res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+        res.send(result.file);
+        return;
+      }
       res.status(result.status).json(result.body);
     } catch (error) { next(error); }
   });
