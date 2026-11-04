@@ -16,6 +16,9 @@ import {
   Upload,
 } from 'lucide-react';
 import { SystemConfig, WelcomeBannerItem } from '../types';
+import { CLOUD_MODE } from '../lib/apiTransport';
+import { brandingAvatars, brandingImages } from '../lib/brandingAssets';
+import { newRequestKey } from '../lib/requestKey';
 import {
   apiFetchSystemConfig,
   apiPublishSystemConfig,
@@ -69,6 +72,17 @@ const DEFAULT_FALLBACK_CONFIG: SystemConfig = {
   },
 };
 
+function BrandingImagePicker({ label, avatar, onSelect }: { label: string; avatar?: boolean; onSelect: (path: string) => void }) {
+  return (
+    <select aria-label={label} value="" onClick={event => event.stopPropagation()}
+      onChange={event => { if (event.target.value) onSelect(event.target.value); }}
+      className="max-w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-bold">
+      <option value="" disabled>{label}</option>
+      {(avatar ? brandingAvatars : brandingImages).map(asset => <option key={asset.path} value={asset.path}>{asset.label}</option>)}
+    </select>
+  );
+}
+
 export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
   systemConfig,
   onSystemConfigPublished,
@@ -84,6 +98,8 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [savingOverlayMessage, setSavingOverlayMessage] = useState<string | null>(null);
+  const [conflictingConfig, setConflictingConfig] = useState<SystemConfig | null>(null);
+  const [publishedRevision, setPublishedRevision] = useState<number | null>(null);
   const [isPublishing, setIsPublishing] = useState<boolean>(false);
 
   useEffect(() => {
@@ -303,11 +319,32 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
     }
   };
 
+  const selectInstitutionalImage = (slot: 'sidebarPoster' | 'topHeader' | 'defaultAvatar', imageUrl: string) => {
+    setDraft(prev => ({ ...prev, [slot]: { ...prev[slot], imageUrl, width: undefined, height: undefined } }));
+  };
+  const selectInstitutionalBanner = (index: number | null, imageUrl: string) => {
+    setDraft(prev => {
+      const items = [...prev.welcomeBanner.items];
+      if (index === null) {
+        if (items.length >= 5) return prev;
+        items.push({
+          id: newRequestKey(), imageUrl,
+          altText: brandingImages.find(asset => asset.path === imageUrl)?.label || 'Imagem institucional RODOVAR',
+          isDecorative: false, focusX: 50, focusY: 50,
+        });
+      } else if (items[index]) {
+        items[index] = { ...items[index], imageUrl, width: undefined, height: undefined };
+      }
+      return { ...prev, welcomeBanner: { ...prev.welcomeBanner, items } };
+    });
+  };
   const hasLowResWarnings = Object.keys(lowResWarnings).length > 0;
 
   const handleSaveAndRefresh = async () => {
     if (isPublishing) return;
     setErrorMsg(null);
+    setPublishedRevision(null);
+    setConflictingConfig(null);
 
     if (draft.welcomeBanner.items.length < 1 || draft.welcomeBanner.items.length > 5) {
       setErrorMsg('O Banner de boas-vindas deve possuir entre 1 e 5 imagens.');
@@ -332,6 +369,7 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
       });
 
       if (!res.ok || !res.systemConfig) {
+        if (res.status === 409 && res.systemConfig) setConflictingConfig(res.systemConfig);
         setErrorMsg(
           res.error || 'Não foi possível salvar as configurações no servidor.'
         );
@@ -340,6 +378,12 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
       }
 
       onSystemConfigPublished?.(res.systemConfig);
+      if (CLOUD_MODE) {
+        setDraft(structuredClone(res.systemConfig));
+        setPublishedRevision(res.systemConfig.revision);
+        setIsPublishing(false);
+        return;
+      }
       setSavingOverlayMessage('Configurações salvas. Atualizando o sistema…');
 
       // Preserve active section in sessionStorage before single reload
@@ -374,6 +418,16 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {CLOUD_MODE && <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+        Selecione imagens do catálogo institucional para publicar na homologação. O envio de novos arquivos depende do armazenamento remoto.
+      </p>}
+      {publishedRevision !== null && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">
+        Revisão {publishedRevision} publicada. O portal já usa a nova configuração.
+      </p>}
+      {conflictingConfig && <button type="button" className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white"
+        onClick={() => { setDraft(structuredClone(conflictingConfig)); setConflictingConfig(null); setErrorMsg(null); }}>
+        Carregar revisão publicada e descartar alterações deste formulário
+      </button>}
       {/* Saving & Updating Full-Screen Confirmation Toast */}
       {savingOverlayMessage && (
         <div
@@ -518,20 +572,24 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
           </p>
 
           <div className="flex flex-wrap items-center gap-2 pt-2">
-            <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-4 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-2xs">
-              <Upload className="w-3.5 h-3.5" />
-              <span>
-                {uploadingSlot === 'sidebarPoster'
-                  ? 'Validando imagem…'
-                  : 'Selecionar Imagem (JPG, PNG, WebP até 5 MB)'}
-              </span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={(e) => handleUploadSingleSlot('sidebarPoster', e)}
-                className="hidden"
-              />
-            </label>
+            {CLOUD_MODE ? (
+              <BrandingImagePicker label="Escolher cartaz institucional" onSelect={path => selectInstitutionalImage('sidebarPoster', path)} />
+            ) : (
+              <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-4 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-2xs">
+                <Upload className="w-3.5 h-3.5" />
+                <span>
+                  {uploadingSlot === 'sidebarPoster'
+                    ? 'Validando imagem…'
+                    : 'Selecionar Imagem (JPG, PNG, WebP até 5 MB)'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => handleUploadSingleSlot('sidebarPoster', e)}
+                  className="hidden"
+                />
+              </label>
+            )}
 
             <button
               type="button"
@@ -628,18 +686,22 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-2">
-            <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-4 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
-              <Upload className="w-3.5 h-3.5" />
-              <span>
-                {uploadingSlot === 'topHeader' ? 'Validando imagem…' : 'Selecionar Imagem do Topo'}
-              </span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={(e) => handleUploadSingleSlot('topHeader', e)}
-                className="hidden"
-              />
-            </label>
+            {CLOUD_MODE ? (
+              <BrandingImagePicker label="Escolher imagem do cabeçalho" onSelect={path => selectInstitutionalImage('topHeader', path)} />
+            ) : (
+              <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-4 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5" />
+                <span>
+                  {uploadingSlot === 'topHeader' ? 'Validando imagem…' : 'Selecionar Imagem do Topo'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => handleUploadSingleSlot('topHeader', e)}
+                  className="hidden"
+                />
+              </label>
+            )}
 
             <button
               type="button"
@@ -707,20 +769,24 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             {draft.welcomeBanner.items.length < 5 && (
-              <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-3.5 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
-                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>
-                  {uploadingSlot === 'welcomeBanner-add'
-                    ? 'Enviando…'
-                    : `Adicionar Imagem (${draft.welcomeBanner.items.length}/5)`}
-                </span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={(e) => handleAddOrReplaceBannerImage(null, e)}
-                  className="hidden"
-                />
-              </label>
+              CLOUD_MODE ? (
+                <BrandingImagePicker label="Adicionar imagem ao carrossel" onSelect={path => selectInstitutionalBanner(null, path)} />
+              ) : (
+                <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-3.5 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
+                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>
+                    {uploadingSlot === 'welcomeBanner-add'
+                      ? 'Enviando…'
+                      : `Adicionar Imagem (${draft.welcomeBanner.items.length}/5)`}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => handleAddOrReplaceBannerImage(null, e)}
+                    className="hidden"
+                  />
+                </label>
+              )
             )}
 
             <button
@@ -856,19 +922,23 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
 
-                    <label
-                      onClick={(ev) => ev.stopPropagation()}
-                      className="px-2.5 py-1.5 rounded-lg bg-[#080B0D] text-[#FFD400] text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
-                    >
-                      <ImageIcon className="w-3 h-3" />
-                      <span>Substituir</span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        onChange={(e) => handleAddOrReplaceBannerImage(idx, e)}
-                        className="hidden"
-                      />
-                    </label>
+                    {CLOUD_MODE ? (
+                      <BrandingImagePicker label={'Substituir imagem ' + (idx + 1)} onSelect={path => selectInstitutionalBanner(idx, path)} />
+                    ) : (
+                      <label
+                        onClick={(ev) => ev.stopPropagation()}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#080B0D] text-[#FFD400] text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <ImageIcon className="w-3 h-3" />
+                        <span>Substituir</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={(e) => handleAddOrReplaceBannerImage(idx, e)}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
 
                     <button
                       type="button"
@@ -1028,20 +1098,24 @@ export const SystemConfigTab: React.FC<SystemConfigTabProps> = ({
           </p>
 
           <div className="flex flex-wrap items-center gap-2 pt-2">
-            <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-4 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
-              <Upload className="w-3.5 h-3.5" />
-              <span>
-                {uploadingSlot === 'defaultAvatar'
-                  ? 'Validando imagem…'
-                  : 'Selecionar Novo Avatar Padrão'}
-              </span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={(e) => handleUploadSingleSlot('defaultAvatar', e)}
-                className="hidden"
-              />
-            </label>
+            {CLOUD_MODE ? (
+              <BrandingImagePicker avatar label="Escolher avatar padrão" onSelect={path => selectInstitutionalImage('defaultAvatar', path)} />
+            ) : (
+              <label className="bg-[#FFD400] hover:bg-[#ffdf33] text-[#080B0D] text-xs font-extrabold px-4 py-2 rounded-lg inline-flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5" />
+                <span>
+                  {uploadingSlot === 'defaultAvatar'
+                    ? 'Validando imagem…'
+                    : 'Selecionar Novo Avatar Padrão'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => handleUploadSingleSlot('defaultAvatar', e)}
+                  className="hidden"
+                />
+              </label>
+            )}
 
             <button
               type="button"

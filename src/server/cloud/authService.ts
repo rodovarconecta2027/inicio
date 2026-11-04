@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { loadBranding } from './branding.js';
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
 import { loadCloudIdentity } from './identity.js';
@@ -79,7 +80,7 @@ export class CloudAuthService {
     batch.set(attempt.ref, { count: 0, blockedUntil: 0, windowStartedAt: now });
     batch.create(this.runtime.db.collection('audit_logs').doc(), { actorId: token.uid, action: 'AUTH_LOGIN', atIso: new Date(now).toISOString() });
     await batch.commit();
-    const config = (await this.runtime.db.collection('system_settings').doc('portal').get()).data()?.config;
+    const config = await loadBranding(this.runtime.db);
     return { ok: true, authenticated: true, user, sessionId, csrfToken, expiresAt, ...(config ? { systemConfig: config } : {}) };
   }
 
@@ -102,7 +103,7 @@ export class CloudAuthService {
     const { user, account, accessRevokedAt } = identity;
     if (Number(saved.accessRevokedAt || 0) !== accessRevokedAt) throw error('Sessão revogada. Entre novamente.', 401, 'SESSION_REVOKED');
     if (saved.authTime < Math.floor(Date.parse(account.tokensValidAfterTime || '1970-01-01T00:00:00Z') / 1000)) throw error('Sessão revogada.', 401, 'SESSION_REVOKED');
-    const config = (await this.runtime.db.collection('system_settings').doc('portal').get()).data()?.config;
+    const config = await loadBranding(this.runtime.db);
     return { authenticated: true, user, sessionId, csrfToken: saved.csrfToken, expiresAt: saved.expiresAt, ...(config ? { systemConfig: config } : {}) };
   }
 

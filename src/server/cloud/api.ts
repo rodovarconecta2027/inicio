@@ -1,4 +1,4 @@
-import { getDefaultSystemConfig } from './branding.js';
+import { getDefaultSystemConfig, loadBranding, registerCloudBrandingWrites } from './branding.js';
 import { registerCloudModuleRoutes } from './moduleRoutes.js';
 import { registerCloudFreightRoutes } from './freightRoutes.js';
 import express, { type RequestHandler } from 'express';
@@ -23,7 +23,7 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     next();
   });
   app.get(['/api/cloud/system-config', '/api/cloud/system-config/version'], async (req, res, next) => {
-    try { const stored = await db.collection('system_settings').doc('branding').get(); const config = stored.exists ? stored.data() : getDefaultSystemConfig();
+    try { const config = await loadBranding(db);
       res.json(req.path.endsWith('/version') ? { revision: config!.revision } : { systemConfig: config, defaults: getDefaultSystemConfig() });
     } catch (error) { next(error); }
   });
@@ -78,6 +78,7 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     }
   };
   app.get('/api/cloud/session', guard, (req: any, res) => res.json({ authenticated: true, user: req.sessionUser }));
+  registerCloudBrandingWrites(app, guard, db);
   registerCloudChatRoutes(app, guard, new FirestoreChatService(db));
   registerCloudFreightRoutes(app, guard, db);
   registerCloudModuleRoutes(app, guard, db);

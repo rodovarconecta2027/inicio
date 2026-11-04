@@ -44,6 +44,25 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
     body: JSON.stringify({ action, accessLevel: 'ADMINISTRADOR', reason: 'TESTE de homologação' }),
   });
   try {
+    const brandingPath = base.replace(/\/admin$/, '/system-config');
+    const { systemConfig } = await (await fetch(brandingPath)).json();
+    const publish = (payload: object, authSession = changed) => fetch(brandingPath + '/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Rodovar-Session': authSession.sessionId, 'X-CSRF-Token': authSession.csrfToken },
+      body: JSON.stringify(payload),
+    });
+    const draft = { ...systemConfig, baseRevision: systemConfig.revision, topHeader: { ...systemConfig.topHeader, focusX: 67 } };
+    assert.equal((await publish(draft, old)).status, 403);
+    assert.equal((await publish({ ...draft, topHeader: { imageUrl: '/assets/../../private.png' } })).status, 400);
+    assert.equal((await publish({ ...draft, welcomeBanner: { items: [] } })).status, 400);
+    const concurrent = await Promise.all([publish(draft), publish(draft)]);
+    assert.deepEqual(concurrent.map(response => response.status).sort(), [200, 409]);
+    const version = await (await fetch(brandingPath + '/version')).json();
+    assert.equal(version.revision, systemConfig.revision + 1);
+    const newSession = await service.session(changed.sessionId);
+    assert.equal(newSession.systemConfig?.topHeader.focusX, 67);
+    assert.equal((await runtime.db.collection('audit_logs').where('action', '==', 'SYSTEM_CONFIG_PUBLISHED').get()).size, 1);
+
     assert.equal((await decide(staffUid, 'SUSPENDER', old)).status, 403);
     assert.equal((await decide(uid, 'SUSPENDER')).status, 403);
     assert.equal((await decide(staffUid, 'SUSPENDER')).status, 200);
