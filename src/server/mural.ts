@@ -5,6 +5,7 @@ import path from 'node:path';
 import type {Express} from 'express';
 import {hasPagePermission} from '../lib/permissions.js';
 import type {Announcement,Employee} from '../types';
+import {legacyDocumentCatalog} from './legacyDocumentCatalog.js';
 export function registerMural(app:Express,guard:any,db:any,save:()=>void,initial:Announcement[],remote=false){
  if(!remote) registerPolls(app,guard);
  const directory=path.join(process.env.RODOVAR_DATA_ROOT||process.cwd(),'data','mural-attachments');
@@ -20,6 +21,7 @@ export function registerMural(app:Express,guard:any,db:any,save:()=>void,initial
  const notify=(a:any)=>{if(a.draft||a.archived)return;for(const u of db.users.filter((u:Employee)=>visible(a,u)&&(a.targetAudience==='Todos'||a.targetAudience===u.department))){const id='mural:'+a.id+':'+u.id;if(!state.notifications.some((n:any)=>n.id===id))state.notifications.push({id,recipientId:u.id,targetId:a.id,publicationId:a.id,type:'comunicado',title:'Novo comunicado publicado',subtitle:a.title,read:false,timeLabel:'Mural',targetSection:'comunicados',createdAtIso:new Date().toISOString()});}};
  const publicRecord=(a:any,u:Employee)=>{const copy=structuredClone(a);if(!publisher(u)){copy.readReceipts=copy.readReceipts.filter((r:any)=>r.userId===u.id);copy.readCount=a.readReceipts.length;delete copy.editHistory;delete copy.versions;}return copy;};
  const cleanFile=(input:any,req:any)=>{
+  if(!input.dataUrl&&legacyDocumentCatalog.some(file=>file.source===input.url)&&req.sessionUser.accessLevel!=='ADMINISTRADOR')throw Error('Somente o administrador pode vincular um PDF do acervo legado.');
   if(!input.dataUrl)return input.url&&/^\/assets\/[a-zA-Z0-9_./%() -]+$/.test(input.url)&&!input.url.includes('..')?{name:String(input.name).slice(0,160),size:String(input.size||''),type:String(input.type||''),url:input.url}:null;
   const match=/^data:([^;,]+);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(input.dataUrl);if(!match)throw Error('Arquivo inválido.');const bytes=Buffer.from(match[2],'base64');
   const extension=String(input.name||'').split('.').pop()?.toLowerCase();const signature=bytes.subarray(0,8);

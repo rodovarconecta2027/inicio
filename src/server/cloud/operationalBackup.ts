@@ -46,7 +46,7 @@ export function registerOperationalBackup(app: Express, guard: RequestHandler, d
       const {backup,sha256} = parseBackup(req.body?.serialized);
       const result = await db.runTransaction(async tx => {
         await requireProtectedAdmin(tx,db,actor);
-        const exported = await tx.get(db.collection('audit_logs').where('sha256','==',sha256).limit(1));
+        const exported = await tx.get(db.collection('audit_logs').where('sha256','==',sha256).where('action','==','OPERATIONS_BACKUP_EXPORTED').limit(1));
         if (exported.docs[0]?.data().action !== 'OPERATIONS_BACKUP_EXPORTED') return fail('O arquivo não corresponde a uma exportação desta homologação.',404);
         const keyRef = db.collection('operation_keys').doc('backup_restore_' + sha(actor.id + ':' + sha256 + ':' + String(req.body?.planHash || '')));
         if (action === 'restore') {
@@ -171,7 +171,7 @@ export function registerOperationalBackup(app: Express, guard: RequestHandler, d
       }
       const match = await db.runTransaction(async tx => {
         await requireProtectedAdmin(tx, db, actor);
-        const found = await tx.get(db.collection('audit_logs').where('sha256', '==', sha256).limit(1));
+        const found = await tx.get(db.collection('audit_logs').where('sha256', '==', sha256).where('action', '==', 'OPERATIONS_BACKUP_EXPORTED').limit(1));
         const record = found.docs[0]?.data();
         return record?.action === 'OPERATIONS_BACKUP_EXPORTED' ? record : null;
       });

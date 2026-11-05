@@ -202,7 +202,12 @@ export async function verifyRemoteModules(adminSession: { sessionId: string; csr
     const legacyFile=await fetch(base+legacyPath,{headers:adminHeaders});
     assert.equal(legacyFile.status,200);assert.equal(legacyFile.headers.get('content-type'),'application/pdf');
     const legacyBytes=Buffer.from(await legacyFile.arrayBuffer());assert.equal(crypto.createHash('sha256').update(legacyBytes).digest('hex'),legacy.sha256);
-    await call('dir','/mural',{title:'TESTE documento legado vinculado',content:'Arquivo original preservado',category:'Comunicado Geral',priority:'Normal',targetAudience:'Todos',attachments:[{name:legacy.name,type:'PDF',url:legacy.source}]},'POST',201);
+    const legacyPublication={title:'TESTE documento legado vinculado',content:'Arquivo original preservado',category:'Comunicado Geral',priority:'Normal',targetAudience:'Todos',attachments:[{name:legacy.name,type:'PDF',url:legacy.source}]};
+    await call('dir','/mural',legacyPublication,'POST',400);
+    await call('dir','/mural',{...legacyPublication,attachments:[],content:legacy.source},'POST',201);
+    await call('mon',legacyPath,undefined,'GET',404);
+    const linkedLegacy=await fetch(base+'/mural',{method:'POST',headers:{...adminHeaders,'X-Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(legacyPublication)});
+    assert.equal(linkedLegacy.status,201);
     assert.equal((await fetch(base+legacyPath,{headers:{'X-Rodovar-Session':actors.mon.sessionId}})).status,200);
     const exportResponse = await fetch(base + exportPath, { method: 'POST', headers: adminHeaders });
     assert.equal(exportResponse.status, 200);

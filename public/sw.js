@@ -1,5 +1,5 @@
 /* RODOVAR CONECTA — Service Worker Oficial (PWA + Web Share Target + Atualização Controlada) */
-const SW_VERSION = '2026.10.28-v3';
+const SW_VERSION = '2026.11.05-v4';
 const CACHE_NAME = `rodovar-conecta-shell-${SW_VERSION}`;
 const IDB_NAME = 'rodovar_shared_receipts_idb';
 const IDB_VERSION = 1;
@@ -117,6 +117,7 @@ function isSensitiveOrAuthenticatedRequest(request, url) {
   if (url.origin !== self.location.origin) return true;
   if (
     url.pathname.startsWith('/api/') ||
+    /\.pdf$/i.test(url.pathname) ||
     url.pathname.startsWith('/uploads/') ||
     url.pathname.includes('comprovante') ||
     url.pathname.includes('pagamentos') ||
@@ -124,10 +125,15 @@ function isSensitiveOrAuthenticatedRequest(request, url) {
   ) {
     return true;
   }
-  if (request.headers.get('Authorization')) {
+  if (request.headers.get('Authorization') || request.headers.get('X-Rodovar-Session')) {
     return true;
   }
   return false;
+}
+
+function canCacheShellResponse(response) {
+  return response && response.status === 200 && response.type === 'basic' && !response.redirected &&
+    !/(?:no-store|private)/i.test(response.headers.get('Cache-Control') || '');
 }
 
 function isStaticShellAsset(url) {
@@ -228,7 +234,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response && response.ok && response.type === 'basic') {
+          if (canCacheShellResponse(response) && (response.headers.get('Content-Type') || '').includes('text/html')) {
             const copy = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy)).catch(() => {});
           }
@@ -256,11 +262,7 @@ self.addEventListener('fetch', (event) => {
       caches.match(event.request).then((cachedResponse) => {
         const networkFetch = fetch(event.request)
           .then((networkResponse) => {
-            if (
-              networkResponse &&
-              networkResponse.status === 200 &&
-              networkResponse.type === 'basic'
-            ) {
+            if (canCacheShellResponse(networkResponse)) {
               const clone = networkResponse.clone();
               caches
                 .open(CACHE_NAME)

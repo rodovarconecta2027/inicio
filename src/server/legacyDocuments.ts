@@ -14,9 +14,9 @@ export function legacyDocumentVisible(user:any,url:string,mural:any,agenda:any) 
   if(user.accessLevel==='ADMINISTRADOR')return true;
   const publisher=['ADMINISTRADOR','DIRETORIA'].includes(user.accessLevel);
   if(hasPagePermission(user,'comunicados') && (mural?.announcements||[]).some((a:any)=>
-    (publisher||!a.draft&&(a.targetAudience==='Todos'||a.targetAudience===user.department))&&references(a,url))) return true;
+    (publisher||!a.draft&&(a.targetAudience==='Todos'||a.targetAudience===user.department))&&references(a.attachments,url))) return true;
   return hasPagePermission(user,'agenda') && (agenda?.events||[]).some((event:any)=>
-    (event.ownerId===user.id||event.visibility==='Todos'||event.invitees?.includes(user.id)||event.sectors?.includes(user.department))&&references(event,url));
+    (event.ownerId===user.id||event.visibility==='Todos'||event.invitees?.includes(user.id)||event.sectors?.includes(user.department))&&(references(event.attachments,url)||event.pdfUrl===url));
 }
 
 export function registerLegacyDocumentRedirects(app:Express,prefix:string) {

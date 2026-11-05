@@ -11,12 +11,13 @@ Atualização de 05/11/2026, posterior à entrega fullscreen de Fretes Ativos.
 - Restauração operacional oferece prévia e confirmação e recupera somente registros ausentes. Conflitos e dados atuais são preservados. O arquivo precisa corresponder ao hash de uma exportação auditada deste ambiente.
 - Vencimentos de solicitações são avaliados ao consultar a fila e persistidos no servidor, com deduplicação por vencimento. Não há promessa de execução agendada quando ninguém consulta o portal.
 - Quinze PDFs legados foram movidos de `public/` para `resources/legacy-documents/`, sem alterar seus bytes. Links antigos redirecionam ao endpoint autorizado. O administrador consulta o acervo; demais usuários acessam arquivos vinculados a comunicados/eventos visíveis.
+- Novos vínculos de PDFs legados no Mural exigem o administrador. Apenas mencionar um caminho em texto não concede acesso. O PWA exclui PDFs, APIs e respostas privadas/no-store do cache; a versão do cache foi atualizada.
 
 ## Verificação
 
 `npm run cloud:test`: seis testes de integração, com cenários novos para arquivos corporativos, associação de conversas, reinício da API, restauração, concorrência do SLA e documentos legados.
 
-Nove regressões locais: Mural, enquetes, Agenda, RH externo e contrato bancário, capas, modalidades financeiras e envio de anexos.
+Doze regressões locais: Mural, enquetes, Agenda, RH externo e contrato bancário, capas, modalidades financeiras, envio de anexos e três cenários de cache privado do PWA.
 
 TypeScript geral/API e build Vite aprovados. Login, restauração de um registro fictício, upload no chat, F5 e logout conferidos no navegador contra emuladores. Nenhum usuário, frete ou pagamento real foi usado nesses testes.
 
