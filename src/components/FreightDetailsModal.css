@@ -1,6 +1,90 @@
-/* Centered modal presentation; freight data, actions and stage handlers are reused. */
-.fa-surface .fa-workspace.fa-workspace--open{display:block!important;grid-template-columns:1fr!important;padding-right:0!important}.fa-surface .fa-drawer-shell{position:fixed!important;inset:0!important;z-index:70!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:24px!important;width:100%!important;height:100dvh!important;pointer-events:auto!important}.fa-surface .fa-drawer-backdrop{position:absolute!important;inset:0!important;background:#080d16b8!important;backdrop-filter:blur(3px)}.fa-surface .fa-detail-panel{position:relative!important;inset:auto!important;top:auto!important;right:auto!important;bottom:auto!important;width:min(1120px,96vw)!important;max-width:1120px!important;height:min(900px,92dvh)!important;max-height:92dvh!important;margin:0!important;border:1px solid #dce3ed!important;border-radius:22px!important;box-shadow:0 24px 90px #0005!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;transform:none!important}.fa-surface .fa-detail-heading{padding:20px 26px!important;background:linear-gradient(110deg,#fff,#fffbea)}.fa-surface .fa-detail-heading h2{font-size:22px!important}.fa-carrier-identity{display:flex;align-items:center;gap:14px;margin-bottom:14px;font-size:12px;color:#526174}.fa-carrier-identity>span{text-transform:uppercase;letter-spacing:.06em;font-weight:600}.fa-surface .fa-detail-tabs{display:flex!important;flex-wrap:wrap!important;flex-shrink:0;padding:10px 20px!important;gap:8px!important;background:white!important}.fa-surface .fa-detail-tabs button{flex:1 1 150px;min-height:43px;white-space:normal!important;font-size:13px!important;border-radius:10px!important}.fa-surface .fa-detail-body{flex:1;min-height:0;overflow-y:auto!important;padding:22px 26px!important;overscroll-behavior:contain}.fa-surface .fa-stage-timeline{grid-template-columns:repeat(4,minmax(0,1fr))!important}.fa-details-order-button{display:flex;align-items:center;gap:8px;background:#ffd400;padding:11px 16px;border-radius:10px;font-size:14px;font-weight:600}.fa-surface .fa-freight-card{cursor:pointer}.fa-surface .fa-freight-card:focus-visible{outline:2px solid #b89700;outline-offset:3px}@media(max-width:650px){.fa-surface .fa-drawer-shell{padding:8px!important}.fa-surface .fa-detail-panel{width:100%!important;max-height:96dvh!important;height:96dvh!important;border-radius:15px!important}.fa-surface .fa-detail-heading{padding:15px!important}.fa-surface .fa-detail-body{padding:15px!important}.fa-surface .fa-detail-tabs{padding:8px!important;gap:5px!important}.fa-surface .fa-detail-tabs button{flex-basis:30%;padding:8px!important;font-size:12px!important}.fa-surface .fa-stage-timeline{grid-template-columns:repeat(2,minmax(0,1fr))!important}.fa-carrier-identity{margin-bottom:8px}}@media(prefers-reduced-motion:reduce){.fa-surface .fa-detail-panel{animation:none!important;transition:none!important}}
-.fa-surface .fa-drawer-backdrop{display:block!important}
-
-/* Premium reference: institutional banner, saved freight identity and compact facts. */
-.fa-surface .fa-detail-panel{width:min(1280px,96vw)!important;max-width:1280px!important;background:#f4f7fb!important}.fa-surface .fa-detail-heading{padding:0 24px 16px!important;background:#fff!important;flex-shrink:0;position:relative}.fa-detail-banner{margin:0 -24px 15px;padding:22px 32px;min-height:140px;background:linear-gradient(90deg,#061220 20%,#061220c9 52%,transparent),url('/assets/banner-rodovar-truck.jpg') center 48%/cover;color:white}.fa-detail-banner>span{font-size:12px;color:#ffd400;font-weight:700;letter-spacing:.1em}.fa-detail-banner>strong{display:block;font-size:29px;font-weight:700;line-height:1.25;margin:8px 0}.fa-detail-banner>p{font-size:14px;max-width:60%;line-height:1.5;color:#eef2f8}.fa-surface .fa-detail-close{position:absolute;right:17px;top:15px;background:white!important;color:#17212e!important;border-radius:10px!important}.fa-carrier-identity{margin:0 0 10px}.fa-surface .fa-detail-heading h2{font-size:18px!important}.fa-surface .fa-detail-heading p{color:#334155!important;font-size:13px!important}.fa-detail-banner>p{color:#eef2f8!important}.fa-modal-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:12px 24px;background:#fff;flex-shrink:0;border-bottom:1px solid #dce4ee}.fa-modal-facts>div{display:flex;gap:10px;align-items:center;background:#f3f6fa;border:1px solid #dbe3ee;border-radius:11px;padding:10px 12px;min-width:0}.fa-modal-facts span{font-size:12px;color:#526174;min-width:0}.fa-modal-facts strong{display:block;font-size:14px;color:#17212e;font-weight:600;overflow-wrap:anywhere}.fa-modal-facts svg{flex-shrink:0}.fa-surface .fa-stage-progress{background:white;border:1px solid #dae3ed;border-radius:15px;padding:16px}.fa-surface .fa-stage-progress>p{font-size:17px;font-weight:700;color:#17212e;margin-bottom:13px}.fa-surface .fa-stage-timeline li{min-height:55px;border-radius:11px;padding:10px!important;background:linear-gradient(#fff,#eef2f8);color:#273549!important;font-size:13px!important}.fa-surface .fa-stage-timeline li[data-state=current]{background:#fff1b2!important;border-color:#eab800!important;color:#17212e!important}.fa-surface .fa-detail-tabs{background:#f7f9fc!important;border-bottom:1px solid #dbe3ed}.fa-surface .fa-detail-tabs button[aria-pressed=true]{background:#081421!important;color:#ffd000!important;box-shadow:0 3px 8px #17212e19}@media(max-height:800px) and (min-width:651px){.fa-detail-banner{min-height:100px;padding:12px 28px}.fa-detail-banner>strong{font-size:24px;margin:4px 0}.fa-carrier-identity{position:absolute;right:24px;bottom:25px}.fa-modal-facts{padding-top:8px;padding-bottom:8px}}@media(max-width:650px){.fa-detail-banner{margin:-15px -15px 12px;padding:18px;min-height:110px}.fa-detail-banner>strong{font-size:23px}.fa-detail-banner>p{max-width:85%;font-size:12px}.fa-modal-facts{grid-template-columns:1fr 1fr;padding:8px 12px;gap:6px}.fa-modal-facts>div{padding:7px}.fa-modal-facts strong{font-size:12px}.fa-modal-facts span{font-size:11px}.fa-carrier-identity{position:static}.fa-surface .fa-detail-heading{padding:15px!important}.fa-surface .fa-stage-timeline{grid-template-columns:1fr 1fr!important}}
+/* Fullscreen details: one vertical scroll region, isolated from the portal layout. */
+.fa-fullscreen-overlay .fa-drawer-shell {
+  position: fixed; inset: 0; z-index: 80; display: block;
+  width: 100%; height: 100vh; height: 100dvh; padding: 0;
+  pointer-events: auto;
+}
+.fa-fullscreen-overlay .fa-detail-panel {
+  position: relative; display: flex; flex-direction: column;
+  width: 100%; max-width: none; height: 100%; max-height: none;
+  margin: 0; border: 0; border-radius: 0; box-shadow: none;
+  overflow: hidden; background: #f5f6f8; color: #202832;
+}
+.fa-fullscreen-overlay .fa-detail-heading {
+  position: relative; flex: 0 0 auto; padding: 18px 72px 16px 28px;
+  background: #101820; color: white; border-bottom: 3px solid #ffd400;
+  isolation: isolate;
+}
+.fa-detail-banner {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, #101820 25%, #101820ec 58%, #10182055),
+    url('/assets/banner-rodovar-truck.jpg') center 48% / cover;
+}
+.fa-detail-banner > span { display: block; margin: 14px 28px; color: #ffd400; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+.fa-detail-banner > strong { display: none; }
+.fa-fullscreen-overlay .fa-detail-heading h2 { margin-top: 20px; color: white; font-size: 24px; line-height: 1.3; font-weight: 700; }
+.fa-detail-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; font-size: 14px; }
+.fa-detail-identity > strong { color: #ffd400; font-size: 17px; }
+.fa-detail-identity > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.fa-fullscreen-overlay .fa-detail-close {
+  position: absolute; top: max(16px, env(safe-area-inset-top)); right: max(20px, env(safe-area-inset-right));
+  width: 44px; height: 44px; border: 1px solid #ffffff70; border-radius: 12px;
+  background: #fff; color: #17202b;
+}
+.fa-fullscreen-overlay .fa-detail-tabs {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  flex: 0 0 auto; gap: 6px; padding: 10px 28px;
+  background: #fff; border-bottom: 1px solid #dce2e8;
+}
+.fa-fullscreen-overlay .fa-detail-tabs button { min-height: 44px; font-size: 14px !important; cursor: pointer; }
+.fa-fullscreen-overlay .fa-detail-tabs button[aria-pressed=true] { background: #101820; color: #ffd400; border-color: #101820; }
+.fa-fullscreen-overlay .fa-detail-body {
+  flex: 1 1 0; min-height: 0; min-width: 0; overflow-y: auto;
+  padding: 24px max(24px, calc((100% - 1440px) / 2)) max(28px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth;
+}
+.fa-operation-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 16px 20px; border: 1px solid #dce2e8; border-radius: 12px; background: #fff; }
+.fa-operation-route { display: flex; align-items: center; gap: 10px; flex: 1 1 350px; min-width: 0; }
+.fa-operation-route svg { flex-shrink: 0; color: #947200; }
+.fa-operation-summary p { color: #465363; }
+.fa-carrier-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 12px; color: #465363; }
+.fa-modal-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.fa-modal-facts > div { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 16px; border: 1px solid #dce2e8; border-radius: 12px; background: #fff; }
+.fa-modal-facts svg { flex-shrink: 0; color: #586575; }
+.fa-modal-facts span { min-width: 0; color: #586575; font-size: 12px; }
+.fa-modal-facts strong { display: block; color: #202832; font-size: 14px; overflow-wrap: anywhere; }
+.fa-fullscreen-overlay .fa-stage-timeline { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.fa-fullscreen-overlay .fa-stage-timeline > li { align-items: center; padding: 12px; }
+.fa-fullscreen-overlay .fa-monitoring-form > .flex:first-child { flex-direction: row; justify-content: space-between; flex-wrap: wrap; }
+.fa-fullscreen-overlay .fa-monitoring-form > .flex:last-child { flex-direction: row; flex-wrap: wrap; }
+.fa-fullscreen-overlay .fa-overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fa-details-order-button { display: inline-flex; align-items: center; gap: 8px; background: #ffd400; color: #17202b; padding: 11px 16px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.fa-detail-feedback { padding: 12px 16px; border: 1px solid #b6d8c4; border-radius: 10px; color: #185638; background: #effaf3; }
+.fa-detail-feedback--error { border-color: #edb4b4; color: #9f2020; background: #fff1f1; }
+.fa-return-overlay { z-index: 90; overflow-y: auto; }
+.fa-return-overlay form { max-height: calc(100dvh - 32px); overflow-y: auto; }
+@media (max-width: 1100px) {
+  .fa-fullscreen-overlay .fa-stage-timeline { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  .fa-fullscreen-overlay .fa-detail-heading { padding: 12px 64px 12px 16px; }
+  .fa-detail-banner > span { margin: 10px 16px; font-size: 11px; }
+  .fa-fullscreen-overlay .fa-detail-heading h2 { margin-top: 18px; font-size: 20px; }
+  .fa-detail-identity { gap: 6px 10px; font-size: 12px; margin-top: 6px; }
+  .fa-fullscreen-overlay .fa-detail-close { right: 12px; top: 12px; }
+  .fa-fullscreen-overlay .fa-detail-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 6px 10px; }
+  .fa-fullscreen-overlay .fa-detail-tabs button { min-height: 42px; padding: 6px; font-size: 12px !important; }
+  .fa-fullscreen-overlay .fa-detail-body { padding: 14px 12px max(24px, env(safe-area-inset-bottom)); }
+  .fa-modal-facts, .fa-fullscreen-overlay .fa-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fa-modal-facts > div { padding: 12px; gap: 8px; }
+  .fa-operation-summary { padding: 12px; gap: 12px; }
+  .fa-fullscreen-overlay .fa-stage-timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-height: 500px) and (min-width: 651px) {
+  .fa-fullscreen-overlay .fa-detail-heading { padding-top: 8px; padding-bottom: 8px; }
+  .fa-detail-banner > span { margin-top: 6px; }
+  .fa-fullscreen-overlay .fa-detail-heading h2 { margin-top: 16px; font-size: 20px; }
+  .fa-detail-identity { margin-top: 4px; }
+  .fa-fullscreen-overlay .fa-detail-tabs { padding-block: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { .fa-fullscreen-overlay .fa-detail-body { scroll-behavior: auto; } }

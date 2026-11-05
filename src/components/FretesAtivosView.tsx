@@ -2,6 +2,7 @@ import {CustomerCover} from './CustomerCover';
 import {CarrierBrandLogo,CARRIER_BRANDS} from '../lib/carrierLogos';
 import {useGlobalLoading} from './GlobalLoading';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   AlertTriangle,
@@ -315,25 +316,39 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const detailPanelRef = useRef<HTMLElement | null>(null);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
-  const isDetailDocked = false;
+  const returnDialogRef = useRef<HTMLFormElement | null>(null);
 
   useEffect(() => {
-    if (!selectedFreight || showReturnExpedicaoModal) return;
-    const panel = detailPanelRef.current;
+    if (!selectedFreight) return;
+    const panel = showReturnExpedicaoModal ? returnDialogRef.current : detailPanelRef.current;
+    const previousFocus = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
-    if (!isDetailDocked) document.body.style.overflow = 'hidden';
-    panel?.querySelector<HTMLButtonElement>('[data-detail-close]')?.focus();
+    document.body.style.overflow = 'hidden';
+    const background = document.getElementById('root');
+    const previousInert = background?.inert;
+    if (background) background.inert = true;
+    panel?.querySelector<HTMLElement>(showReturnExpedicaoModal ? 'textarea' : '[data-detail-close]')?.focus();
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); setSelectedFreight(null); }
-      if (event.key !== 'Tab' || isDetailDocked || !panel) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (showReturnExpedicaoModal) setShowReturnExpedicaoModal(false);
+        else setSelectedFreight(null);
+      }
+      if (event.key !== 'Tab' || !panel) return;
       const controls = Array.from(panel.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled)')).filter(node => node.getClientRects().length > 0);
       const first = controls[0], last = controls[controls.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     document.addEventListener('keydown', keydown);
-    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', keydown); detailTriggerRef.current?.focus(); };
-  }, [selectedFreight?.id, isDetailDocked, showReturnExpedicaoModal]);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (background) background.inert = previousInert ?? false;
+      document.removeEventListener('keydown', keydown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+      else detailTriggerRef.current?.focus();
+    };
+  }, [selectedFreight?.id, showReturnExpedicaoModal]);
 
   // Transfer responsibility state
   const [transferTargetId, setTransferTargetId] = useState<string>('');
@@ -790,7 +805,7 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
   return (
     <div className="fa-surface space-y-4">
       {/* Toast Notification */}
-      {toastMsg && (
+      {toastMsg && !selectedFreight && (
         <div className="fixed bottom-5 right-5 z-50 bg-[#080B0D] text-white border-l-4 border-[#FFD400] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-bold max-w-md">
           <CheckCircle2 className="w-4 h-4 text-[#FFD400] shrink-0" />
           <span>{toastMsg}</span>
@@ -1017,26 +1032,16 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
           )}
         </div>
 
-        {/* RIGHT: Monitoring Operational Side Panel */}
-        {selectedFreight && (
-          <div className="fa-drawer-shell">
-            {!isDetailDocked && <div className="fa-drawer-backdrop" aria-hidden="true" onClick={() => setSelectedFreight(null)} />}
-            <aside id="active-freight-detail" ref={detailPanelRef} className="fa-detail-panel" role="dialog" aria-modal="true" aria-labelledby="active-freight-title">
-            <div className="fa-detail-heading"><div className="fa-detail-banner" aria-hidden="true"><span>RODOVAR CONECTA</span><strong>Detalhes do Frete</strong><p>Acompanhe o andamento, documentos e histórico da operação.</p></div><div className="fa-carrier-identity"><span>Transportadora</span>{selectedFreight.empresaMarca&&CARRIER_BRANDS.includes(selectedFreight.empresaMarca)?<CarrierBrandLogo brand={selectedFreight.empresaMarca} size="lg"/>:<strong>Não informada no cadastro</strong>}</div>
+        {/* Portal prevents transformed/scrolling ancestors from clipping the fullscreen dialog. */}
+        {selectedFreight && createPortal(
+          <div className="fa-surface fa-fullscreen-overlay"><div className="fa-drawer-shell">
+            <aside id="active-freight-detail" ref={detailPanelRef} className="fa-detail-panel" role="dialog" aria-modal="true" aria-labelledby="active-freight-title" inert={showReturnExpedicaoModal}>
+            <div className="fa-detail-heading"><div className="fa-detail-banner" aria-hidden="true"><span>RODOVAR CONECTA</span><strong>Gestão da operação</strong></div>
               <div className="flex items-center justify-between gap-3"><h2 id="active-freight-title" className="text-base font-black tracking-tight text-[#15191D]">Detalhes do frete</h2><button type="button" data-detail-close onClick={() => setSelectedFreight(null)} className="fa-detail-close" aria-label="Fechar detalhes do frete"><X size={19} /></button></div>
-              <div className="mt-4 flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-2 text-sm font-black text-[#15191D]"><span className="rounded-lg bg-amber-50 p-1.5 text-amber-700"><Truck size={16} /></span>{selectedFreight.protocol}</span><span className={`rounded-lg border px-2 py-1 text-[10px] font-extrabold ${getMonitoringBadgeStyle(selectedFreight.situacaoMonitoramento)}`}>{formatSituacaoMonitoramentoLabel(selectedFreight.situacaoMonitoramento)}</span></div>
-              <p className="mt-3 text-xs font-extrabold text-slate-800">{selectedFreight.cliente}</p><p className="mt-1 text-[11px] leading-relaxed text-slate-500">{selectedFreight.origemCidadeUf} → {selectedFreight.destinoCidadeUf}</p>
-              <p className="mt-2 text-[10px] font-medium text-slate-400">Financeiro: {formatSituacaoFinanceiraLabel(selectedFreight.situacaoFinanceira)}</p>
+              <div className="fa-detail-identity"><strong>{selectedFreight.protocol}</strong><span className={`rounded-lg border px-2 py-1 text-xs font-semibold ${getMonitoringBadgeStyle(selectedFreight.situacaoMonitoramento)}`}>{formatSituacaoMonitoramentoLabel(selectedFreight.situacaoMonitoramento)}</span><span>{selectedFreight.cliente}</span></div>
             </div>
 
-            <div className="fa-modal-facts">
-              <div><Calendar size={19}/><span>Data da Coleta<strong>{formatIsoDateBr(selectedFreight.dataColetaIso)}</strong></span></div>
-              <div><Flag size={19}/><span>Previsão de Entrega<strong>{formatIsoDateBr(selectedFreight.dataEntregaPrevistaIso)}</strong></span></div>
-              <div><Truck size={19}/><span>Veículo<strong>{selectedFreight.placaVeiculo||'Não informado'}</strong></span></div>
-              <div><User size={19}/><span>Motorista<strong>{selectedFreight.motoristaNome||'Não informado'}</strong></span></div>
-            </div>
-
-            {/* Tabs */}
+            {/* Tabs stay outside the single scrolling content region. */}
             <div className="fa-detail-tabs" role="group" aria-label="Seções dos detalhes do frete">
               {[
                 { id: 'RESUMO', label: 'Resumo' },
@@ -1045,25 +1050,28 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
                 { id: 'ANEXOS', label: `Documentos (${detailAnexos.length})` },
                 { id: 'HISTORICO', label: 'Histórico' },
               ].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  aria-pressed={activeTab === tab.id}
-                  aria-controls="active-freight-content"
-                  onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                  className={`px-3 py-2 text-xs font-extrabold rounded-t-xl border-b-2 transition cursor-pointer whitespace-nowrap ${
-                    activeTab === tab.id
-                      ? 'bg-[#080B0D] text-[#FFD400] border-[#FFD400]'
-                      : 'text-gray-500 border-transparent hover:text-[#15191D]'
-                  }`}
-                >
+                <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} aria-controls="active-freight-content"
+                  onClick={() => { setActiveTab(tab.id as typeof activeTab); document.getElementById('active-freight-content')?.scrollTo({top: 0}); }}>
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            {/* Body */}
-            <div id="active-freight-content" className="fa-detail-body space-y-4">
+            <div id="active-freight-content" className="fa-detail-body space-y-4" tabIndex={0} aria-label="Conteúdo do frete">
+              {errorMsg && activeTab !== 'ACOMPANHAMENTO' && <div role="alert" className="fa-detail-feedback fa-detail-feedback--error">{errorMsg}</div>}
+              {toastMsg && activeTab !== 'ACOMPANHAMENTO' && <div role="status" className="fa-detail-feedback">{toastMsg}</div>}
+              <div className="fa-operation-summary">
+                <p className="fa-operation-route"><MapPin size={18}/><strong>{selectedFreight.origemCidadeUf} → {selectedFreight.destinoCidadeUf}</strong></p>
+                <div className="fa-carrier-identity"><span>Transportadora</span>{selectedFreight.empresaMarca&&CARRIER_BRANDS.includes(selectedFreight.empresaMarca)?<CarrierBrandLogo brand={selectedFreight.empresaMarca} size="lg"/>:<strong>Não informada no cadastro</strong>}</div>
+                <p>Financeiro: {formatSituacaoFinanceiraLabel(selectedFreight.situacaoFinanceira)}</p>
+              </div>
+            <div className="fa-modal-facts">
+              <div><Calendar size={19}/><span>Data da Coleta<strong>{formatIsoDateBr(selectedFreight.dataColetaIso)}</strong></span></div>
+              <div><Flag size={19}/><span>Previsão de Entrega<strong>{formatIsoDateBr(selectedFreight.dataEntregaPrevistaIso)}</strong></span></div>
+              <div><Truck size={19}/><span>Veículo<strong>{selectedFreight.placaVeiculo||'Não informado'}</strong></span></div>
+              <div><User size={19}/><span>Motorista<strong>{selectedFreight.motoristaNome||'Não informado'}</strong></span></div>
+            </div>
+
               <section className="fa-stage-progress" aria-label="Etapas do monitoramento">
                 <p>Etapas do monitoramento</p>
                 <ol className="fa-stage-timeline">
@@ -1198,6 +1206,8 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
                       </div>
                     )}
 
+                    {errorMsg && <div role="alert" className="fa-detail-feedback fa-detail-feedback--error">{errorMsg}</div>}
+                    {toastMsg && <div role="status" className="fa-detail-feedback">{toastMsg}</div>}
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="submit"
@@ -1625,25 +1635,30 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
               )}
             </div>
             </aside>
-          </div>
+          </div></div>, document.body
         )}
       </div>
 
       {/* =====================================================================
           MODAL: DEVOLVER À EXPEDIÇÃO PARA CORREÇÃO
       ===================================================================== */}
-      {showReturnExpedicaoModal && selectedFreight && (
-        <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4">
+      {showReturnExpedicaoModal && selectedFreight && createPortal(
+        <div className="fa-return-overlay fixed inset-0 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4">
           <form
+            ref={returnDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fa-return-title"
             onSubmit={handleReturnToExpedicao}
             className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-3"
           >
             <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-              <h3 className="text-sm font-black text-[#15191D]">
+              <h3 id="fa-return-title" className="text-sm font-black text-[#15191D]">
                 Devolver Frete {selectedFreight.protocol} à Expedição
               </h3>
               <button
                 type="button"
+                aria-label="Fechar devolução à Expedição"
                 onClick={() => setShowReturnExpedicaoModal(false)}
                 className="text-gray-400 hover:text-gray-700"
               >
@@ -1678,7 +1693,7 @@ export const FretesAtivosView: React.FC<FretesAtivosViewProps> = ({
               </button>
             </div>
           </form>
-        </div>
+        </div>, document.body
       )}
     </div>
   );
