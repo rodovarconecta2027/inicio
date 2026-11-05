@@ -139,6 +139,11 @@ export class CloudAuthService {
     batch.update(this.runtime.db.collection('employee_profiles').doc(current.user.id), { name, phoneExt });
     batch.create(this.runtime.db.collection('audit_logs').doc(), { actorId: current.user.id, action: 'PROFILE_UPDATED', atIso: new Date().toISOString() });
     await batch.commit();
+    try { await this.runtime.auth.updateUser(current.user.id, { displayName: name }); }
+    catch (cause: any) {
+      console.error('profile_display_name_sync_failed', { code: cause?.code || 'UNKNOWN' });
+      throw cause;
+    }
     return { ok: true, user: { ...current.user, name, phoneExt } };
   }
 

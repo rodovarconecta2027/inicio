@@ -11,10 +11,20 @@ import { FirestoreFreightStore } from '../src/server/cloud/freightStore';
 import { CloudAuthService, firebasePasswordVerifier, privateIdentifierKey } from '../src/server/cloud/authService';
 import { bootstrapAdmin } from '../src/server/cloud/bootstrapAdmin';
 import { verifyRemoteModules } from './cloud-modules.integration';
-import { AUTHORIZED_ROSTER } from '../src/lib/accessPolicy';
+import { AUTHORIZED_ROSTER, officialRosterName } from '../src/lib/accessPolicy';
 import { canConfirmFreightPayment, hasPagePermission } from '../src/lib/permissions';
+import { presentOfficialNames } from '../src/server/cloud/presentNames';
 
 let protectedAdminSession: { sessionId: string; csrfToken: string };
+
+test('Nomes históricos são apresentados por UID sem reescrever o registro', () => {
+  const stored = { history: [{ actorId: 'uid-verificado', actorName: 'Colaborador de teste · hml.comercial.02' },
+    { actorId: 'uid-ausente', actorName: 'Autor original' }] };
+  const shown = presentOfficialNames(stored, new Map([['uid-verificado', 'Marival Jerônimo Chagas Filho']]));
+  assert.equal(shown.history[0].actorName, 'Marival Jerônimo Chagas Filho');
+  assert.equal(shown.history[1].actorName, 'Autor original');
+  assert.equal(stored.history[0].actorName, 'Colaborador de teste · hml.comercial.02');
+});
 
 test('Administrador: provisionamento único, primeiro acesso e revogação', async () => {
   const runtime = firebaseTestRuntime(), uid = 'bootstrap-test';
@@ -62,7 +72,8 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
     const rosterBefore = await readRoster();
     assert.equal(rosterBefore.administratorPreserved, true);
     assert.equal(rosterBefore.roster.length, 15);
-    assert.deepEqual(rosterBefore.roster.map(({ name, profile }: typeof AUTHORIZED_ROSTER[number]) => ({ name, profile })), AUTHORIZED_ROSTER);
+    assert.deepEqual(rosterBefore.roster.map(({ name, profile }: typeof AUTHORIZED_ROSTER[number]) => ({ name, profile })),
+      AUTHORIZED_ROSTER.map(person => ({ ...person, name: officialRosterName(person.name) })));
     assert.equal(rosterBefore.unlinkedActive, 1);
     const profiles = new Map<string, any>(rosterBefore.roster.map((slot: any) => [slot.profile, slot]));
     const rhSlot = profiles.get('RH'), commercialSlot = profiles.get('COMERCIAL');
@@ -79,6 +90,8 @@ test('Administrador: provisionamento único, primeiro acesso e revogação', asy
     assert.equal((await link({ ...payload, email: 'staff@rodovar.com.br' })).status, 400);
     const simultaneous = await Promise.all([link(payload), link(payload)]);
     assert.deepEqual(simultaneous.map(response => response.status), [200, 200]);
+    assert.equal((await runtime.db.collection('employee_profiles').doc(testUid).get()).data()?.name, rhSlot.name);
+    assert.equal((await runtime.auth.getUser(testUid)).displayName, rhSlot.name);
     assert.equal((await runtime.db.collection('audit_logs').where('action', '==', 'ROSTER_IDENTITY_LINKED').get()).size, 1);
     assert.equal((await link({ ...payload, slot: commercialSlot.slot })).status, 409);
     const extraUid = 'roster-collision-test', extraEmail = extraUid + '@example.test';

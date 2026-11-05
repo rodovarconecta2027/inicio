@@ -4,6 +4,7 @@ import type { Express, RequestHandler } from 'express';
 import type { Firestore } from 'firebase-admin/firestore';
 import { canViewFreightTeam } from '../../lib/permissions.js';
 import { readPrivateFile, validateFreightUpload, writePrivateFiles } from './freightFiles.js';
+import { presentOfficialNames } from './presentNames.js';
 import type { Employee, UnifiedFreightAttachment, UnifiedFreightRecord } from '../../types';
 import { canUserAccessFreightRecord, emptyFreightEngineState, registerUnifiedFreightRoutes, withFreightEngineState } from '../unifiedFreightEngine.js';
 
@@ -91,7 +92,8 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
         for (const doc of snapshots[1].docs) state.freightSubDocs.set(doc.id, doc.data() as any);
         state.serverNotifications = snapshots[4].docs.map(d => d.data() as any);
         const profiles = new Map(snapshots[3].docs.map(d => [d.id, d.data()]));
-        const users = snapshots[2].docs.filter(d => profiles.has(d.id)).map(d => ({ ...profiles.get(d.id), ...d.data(), id: d.id } as Employee))
+        const users = snapshots[2].docs.filter(d => profiles.has(d.id)).map(d => ({ ...profiles.get(d.id), ...d.data(),
+          name: profiles.get(d.id)?.name, id: d.id } as Employee))
           .filter(u => u.accessLevel !== 'ADMINISTRADOR' || u.id === security?.protectedAdminUid);
         const transactionUser = users.find(u => u.id === req.sessionUser.id);
         if (!transactionUser) fail('Perfil profissional indisponível.', 403);
@@ -115,6 +117,8 @@ export function registerCloudFreightRoutes(app: Express, guard: RequestHandler, 
           saveAttachment: (name: string, bytes: Buffer) => { fileToSave = { name, bytes }; },
         }, output)));
         if (!response) fail('A operação não retornou uma resposta válida.');
+        response!.body = presentOfficialNames(response!.body,
+          new Map(users.map(person => [person.id, person.name])));
         if (mutation && response!.status < 400) {
           if (route.path.endsWith('/monitoramento-action') && req.body?.targetStage === 'FINALIZADO') {
             const completed = state.freightsIndex.get(freightId);

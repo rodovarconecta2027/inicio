@@ -115,6 +115,7 @@ export async function verifyRemoteModules(adminSession: { sessionId: string; csr
     assert.equal((await call('rh2', '/rh-external')).requests.find((r: any) => r.id === external.id).status, 'Análise');
     await call('mon', '/profile', { name: 'TESTE nome atualizado', phoneExt: '123' }, 'PUT');
     assert.equal((await call('mon', '/auth/session')).user.name, 'TESTE nome atualizado');
+    assert.equal((await runtime.auth.getUser(actors.mon.uid)).displayName, 'TESTE nome atualizado');
     await call('mon', '/profile', { accessLevel: 'ADMINISTRADOR' }, 'PUT', 400);
     await call('mon', '/admin/access-requests', undefined, 'GET', 403);
     const event = await call('dir', '/agenda', { title: 'TESTE reunião', description: 'Evento fictício', category: 'Reunião', dateIso: '2026-12-01', start: '09:00', end: '10:00', allDay: false, location: 'Ambiente de teste', organizer: 'TESTE dir', department: 'Diretoria', invitees: [actors.mon.uid], sectors: [], priority: 'Normal', visibility: 'Convidados', attachments: [], recurrence: 'Nenhuma', requireRsvp: true });

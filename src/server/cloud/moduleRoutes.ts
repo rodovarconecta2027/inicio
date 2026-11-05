@@ -11,6 +11,7 @@ import { registerExternalRh, canAccessExternalRh } from '../externalRh.js';
 import { registerDrivers } from '../drivers.js';
 import { registerPaymentReceiptRoutes, withPaymentStore } from '../paymentReceiptsEngine.js';
 import { financialProjection } from '../financialProjection.js';
+import { presentOfficialNames } from './presentNames.js';
 import { hasPagePermission, canConfirmFreightPayment } from '../../lib/permissions.js';
 
 const fail = (message: string, status = 503): never => { throw Object.assign(Error(message), { status }); };
@@ -24,7 +25,8 @@ export async function cloudDirectory(db: Firestore, tx?: Transaction) {
   ]);
   if (accounts.size > 500 || profiles.size > 500) fail('Diretório acima do limite de homologação. Solicite paginação.');
   const people = new Map(profiles.docs.map((d: any) => [d.id, d.data()]));
-  return accounts.docs.filter((d: any) => people.has(d.id)).map((d: any) => ({ ...(people.get(d.id) as any), ...d.data(), id: d.id }))
+  return accounts.docs.filter((d: any) => people.has(d.id)).map((d: any) => ({ ...(people.get(d.id) as any), ...d.data(),
+    name: (people.get(d.id) as any).name, id: d.id }))
     .filter((u: any) => u.accessLevel !== 'ADMINISTRADOR' || security.data()?.protectedAdminUid === u.id);
 }
 
@@ -222,6 +224,8 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           if (module.name === 'finance') await withPaymentStore(state as any, () => execute(0)); else await execute(0);
           if (!response) fail('Resposta do módulo indisponível.');
           if (response.file) return response;
+          response.body = presentOfficialNames(response.body,
+            new Map(users.map((person: any) => [person.id, person.name])));
           if (response.status < 400) {
             if (upload) await writePrivateFiles(tx, db, upload.recordId, upload, []);
             const after = JSON.stringify(state);

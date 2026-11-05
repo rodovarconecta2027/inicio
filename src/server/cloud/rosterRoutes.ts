@@ -1,7 +1,7 @@
 import type { Express, RequestHandler } from 'express';
 import type { Auth } from 'firebase-admin/auth';
 import type { Firestore } from 'firebase-admin/firestore';
-import { AUTHORIZED_ROSTER, PROFILE_MODULES, type AccessProfile } from '../../lib/accessPolicy.js';
+import { AUTHORIZED_ROSTER, PROFILE_MODULES, officialRosterName, type AccessProfile } from '../../lib/accessPolicy.js';
 import { privateIdentifierKey } from './authService.js';
 import { actorOf, requireProtectedAdmin } from './protectedAdmin.js';
 
@@ -57,11 +57,12 @@ export function registerCloudRoster(app: Express, guard: RequestHandler, { auth,
             const link = links[index].data(), account = byUid.get(link?.uid);
             const profile = profileByUid.get(link?.uid), expected = sector(person);
             return {
-              ...person, uid: link?.uid, login: link?.login, actualProfile: account?.accessProfile,
+              ...person, name: officialRosterName(person.name), uid: link?.uid, login: link?.login, actualProfile: account?.accessProfile,
               status: account?.removedAtIso ? 'removed' : !link ? 'unlinked' :
                 profile && account?.active && account.approvalStatus === 'APROVADO' ? 'active' : 'inactive',
               profileMatches: Boolean(account && account.rosterSlot === person.slot && account.accessProfile === person.profile &&
-                account.accessLevel === expected.account.accessLevel && profile?.department === expected.profile.department &&
+                account.accessLevel === expected.account.accessLevel && profile?.name === officialRosterName(person.name) &&
+                profile?.department === expected.profile.department &&
                 profile?.roleTitle === expected.profile.roleTitle &&
                 JSON.stringify(account.permissoesPaginas) === JSON.stringify(expected.account.permissoesPaginas)),
               mustChangePassword: account?.mustChangePassword === true,
@@ -119,7 +120,7 @@ export function registerCloudRoster(app: Express, guard: RequestHandler, { auth,
           tx.create(accountRef, { ...access.account, rosterSlot: person.slot, active: true,
             approvalStatus: 'APROVADO', mustChangePassword: true });
           tx.create(profileRef, { ...access.profile, login, email: identity.email, joinedAt: atIso,
-            name: 'Colaborador de teste · ' + login });
+            name: officialRosterName(person.name) });
         }
         for (const [index, doc] of [loginAlias, emailAlias].entries()) {
           if (!doc.exists) tx.create(aliasRefs[index], { uid, email: identity.email });
@@ -129,6 +130,10 @@ export function registerCloudRoster(app: Express, guard: RequestHandler, { auth,
           targetId: uid, accessProfile: person.profile, atIso });
         return { ok: true };
       });
+      // Authentication and Firestore cannot share a transaction. A retry of this
+      // idempotent link also completes the Authentication display name if needed.
+      if (identity.displayName !== officialRosterName(person.name))
+        await auth.updateUser(uid, { displayName: officialRosterName(person.name) });
       res.json(result);
     } catch (error) { next(error); }
   });

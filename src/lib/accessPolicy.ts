@@ -25,3 +25,6 @@ export const AUTHORIZED_ROSTER: { name: string; profile: AccessProfile }[] = [
   {name:'Augusto César Brito da Cruz', profile:'EXPEDICAO'},
   {name:'Petrônio', profile:'FINANCEIRO'},
 ];
+// The authorized roster uses Petrônio's short name; the verified existing
+// employee registration uses his full professional name.
+export const officialRosterName = (name: string) => name === 'Petrônio' ? 'Petrônio Santos' : name;
