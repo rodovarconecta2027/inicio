@@ -1,5 +1,7 @@
 {
-  "regions": ["gru1"],
+  "regions": [
+    "gru1"
+  ],
   "rewrites": [
     {
       "source": "/api/cloud/:path*",
@@ -67,5 +69,87 @@
         }
       ]
     }
-  ]
+  ],
+  "redirects": [
+    {
+      "source": "/assets/aistudio/01_Comunicados_e_Testes_2027_4d007e46.pdf",
+      "destination": "/api/cloud/legacy-documents/907885564fd38aa738fd4c487b0e1914bbf309d6a8e3e89b2b6746f765557dce",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/01_Regras_da_Empresa_2027_8fc018f2.pdf",
+      "destination": "/api/cloud/legacy-documents/17c1e4c4baca696dd826eab4fab777f26e32aca09d6ebb61f0042b3bac9e6b77",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/02_Manual_da_Equipe_2027_5f4304a6.pdf",
+      "destination": "/api/cloud/legacy-documents/913f72657579956e526bd5a3810872fa08bb99dc3039b44cd8ee7319775208af",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/02_Recesso_e_Continuidade_2027_ffe95a1d.pdf",
+      "destination": "/api/cloud/legacy-documents/dd6c8227db394e3849d33d4f6094d6ac006693c8fd542e9d24bd46cff8eef2a5",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/03_Atendimento_a_Equipe_2027_ca38c7d1.pdf",
+      "destination": "/api/cloud/legacy-documents/7fd9bb0510f1d581877265bff3868b10919d295f16c1668056be83e7e9c89e3d",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/03_Direcao_Defensiva_2027_500e5359.pdf",
+      "destination": "/api/cloud/legacy-documents/fb63ed41d304b0f9252eb9ada29a771c32dfacaaca928dc163a1d92ca957328d",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/04_Seguranca_no_Trabalho_2027_c797c05d.pdf",
+      "destination": "/api/cloud/legacy-documents/86a220c1edc67df828c4fc3aa45db1320d866431b08060ce29bb79f42c3fca32",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/04_Seguranca_Treinamentos_e_Agenda_2027_c075105a.pdf",
+      "destination": "/api/cloud/legacy-documents/6b1594738e7f6847b548b636e99d347ac6c678395db17be71c6419cfeafc20ed",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/05_Formularios_2027_c2bcc9b9.pdf",
+      "destination": "/api/cloud/legacy-documents/e4ac2b986e4b964ced24fbcdc7abcaf4b37622098fad06636f7e0034688d23bf",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/05_Reunioes_e_Planejamento_2027_14c8d18b.pdf",
+      "destination": "/api/cloud/legacy-documents/23c87f17561d0ee00a1f0f82447cb797a07dd95b4d2931864c3380e1b2f69f84",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/06_Comprovantes_e_Guias_de_Trabalho_2027_d375a1ec.pdf",
+      "destination": "/api/cloud/legacy-documents/778a4e65d7447c745831aeb97a3eb529f41d5de3212c23fe5e97c05f740d018a",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/06_Treinamentos_2027_34188451.pdf",
+      "destination": "/api/cloud/legacy-documents/f95d2c8a8af6e2854d27b9e9f0d519987b378f9731839fd0994d4a7ffa4e3d3b",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/07_Funcoes_Profissionais_2027_461a1f82.pdf",
+      "destination": "/api/cloud/legacy-documents/a97cbb75e371d93921ecf1011de4b7729f9d5e79818163522a059bfdb9b0b8ed",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/07_Rotinas_Administrativas_2027__1__2efb89bd.pdf",
+      "destination": "/api/cloud/legacy-documents/2fa5a048b2893318ff4bd5ce8e8c407ade179cd8efec5b6640e04739163c99c1",
+      "permanent": false
+    },
+    {
+      "source": "/assets/aistudio/Ordem_Carregamento_RODOVAR_0847__1__906d4dcc.pdf",
+      "destination": "/api/cloud/legacy-documents/115384507f794323ba2b1b38050a54263922c75893a959d58f2fd7c3421c50b6",
+      "permanent": false
+    }
+  ],
+  "functions": {
+    "api/cloud.ts": {
+      "includeFiles": "resources/legacy-documents/*.pdf"
+    }
+  }
 }

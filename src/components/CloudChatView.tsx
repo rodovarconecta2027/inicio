@@ -9,6 +9,19 @@ export function CloudChatView(props: WhatsAppChatViewProps) {
   const [conversations, setConversations] = useState<any[]>([]), [messages, setMessages] = useState<Record<string, any[]>>({});
   const [error, setError] = useState(''), [loading, setLoading] = useState(true), [selected, setSelected] = useState('');
   const alive = useRef(true), sending = useRef(false), keys = useRef(new Map<string, string>());
+  const attachmentPayload = async (name?: string, mediaUrl?: string) => {
+    if (!name && !mediaUrl) return undefined;
+    if (!name || !mediaUrl) throw Error('Arquivo incompleto. Selecione-o novamente.');
+    if (mediaUrl.startsWith('data:')) return { name, dataUrl: mediaUrl };
+    if (!/^\/api\/cloud\/chat\/messages\/[a-f0-9]{64}\/attachment$/.test(mediaUrl)) throw Error('Selecione um arquivo real de até 3 MB.');
+    const response = await portalFetch(mediaUrl, {headers:getAuthHeaders()});
+    if (!response.ok) throw Error('O arquivo encaminhado não está disponível para sua conta.');
+    const file = await response.blob();
+    return { name, dataUrl: await new Promise<string>((resolve,reject) => {
+      const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(Error('Falha ao ler arquivo.')); reader.readAsDataURL(file);
+    }) };
+  };
   const request = async (path: string, method = 'GET', body?: any) => {
     const signature = JSON.stringify([path, method, body]);
     if (!keys.current.has(signature)) keys.current.set(signature, newRequestKey());
@@ -20,9 +33,11 @@ export function CloudChatView(props: WhatsAppChatViewProps) {
   const refresh = async (id = selected, older?: number) => {
     const list = await request('/conversations');
     if (alive.current) setConversations(list);
-    if (id && list.some((c: any) => c.id === id)) {
-      const page = await request(`/conversations/${id}/messages${older ? '?before=' + older : ''}`);
-      if (alive.current) setMessages(previous => ({ ...previous, [id]: [...new Map([...(previous[id] || []), ...page].map(m => [m.id, m])).values()].sort((a: any, b: any) => a.sequence - b.sequence) }));
+    const target = list.some((c:any)=>c.id===id) ? id : list[0]?.id;
+    if (target && target !== id && alive.current) setSelected(target);
+    if (target) {
+      const page = await request(`/conversations/${target}/messages${older ? '?before=' + older : ''}`);
+      if (alive.current) setMessages(previous => ({ ...previous, [target]: [...new Map([...(previous[target] || []), ...page].map(m => [m.id, m])).values()].sort((a: any, b: any) => a.sequence - b.sequence) }));
     }
     if (alive.current) { setError(''); setLoading(false); }
     return list;
@@ -53,6 +68,7 @@ export function CloudChatView(props: WhatsAppChatViewProps) {
       messages: (messages[c.id] || []).map(m => ({ id: m.id, senderId: m.senderId,
         senderName: props.employees.find(u => u.id === m.senderId)?.name || 'Colaborador',
         text: m.deleted ? 'Mensagem removida' : m.text, timestamp: new Date(m.createdAtIso).toLocaleString('pt-BR'), status: 'delivered',
+        ...(!m.deleted && m.attachment ? {attachment:m.attachment.name,attachmentSize:`${Math.ceil(m.attachment.size/1024)} KB`,mediaType:m.attachment.mediaType,mediaUrl:m.attachment.url} : {}),
         pinned: !!m.pinned, reactions: Object.values(m.reactionsByUser || {}) as string[],
       })),
     };
@@ -74,8 +90,8 @@ export function CloudChatView(props: WhatsAppChatViewProps) {
         if (sending.current) return false;
         sending.current = true;
         try { return await run(async () => {
-          if (attachment || extra?.mediaUrl) throw Error('Envio de arquivos e áudio depende do armazenamento remoto, ainda não configurado. A mensagem não foi enviada.');
-          await request(`/conversations/${id}/messages`, 'POST', { text }); await refresh(id);
+          const file = await attachmentPayload(attachment, extra?.mediaUrl);
+          await request(`/conversations/${id}/messages`, 'POST', { text, ...(file ? {attachment:file} : {}) }); await refresh(id);
         }); } finally { sending.current = false; }
       }}
       onCreateGroupChat={async group => run(async () => { const c = await request('/conversations', 'POST', { participants: group.participantIds, name: group.name, isGroup: true });
@@ -86,10 +102,10 @@ export function CloudChatView(props: WhatsAppChatViewProps) {
       onTogglePinMessage={(id, message) => { void run(async () => { await request('/messages/' + message + '/decoration', 'POST', { pinned: !messages[id]?.find(m => m.id === message)?.pinned }); await refresh(id); }); }}
       onReact={(message, reaction) => { void run(async () => { await request('/messages/' + message + '/decoration', 'POST', { reaction }); await refresh(); }); }}
       onForwardToTargets={(employees, groups, payload) => { void run(async () => {
-        if (payload.attachment || payload.mediaUrl) throw Error('Encaminhamento de arquivos depende do armazenamento remoto.');
+        const attachment = await attachmentPayload(payload.attachment,payload.mediaUrl);
         const targets = [...groups];
         for (const employee of employees) targets.push((await request('/conversations', 'POST', { participants: [employee] })).id);
-        for (const id of new Set(targets)) await request(`/conversations/${id}/messages`, 'POST', { text: payload.text });
+        for (const id of new Set(targets)) await request(`/conversations/${id}/messages`, 'POST', { text: payload.text, ...(attachment ? {attachment} : {}) });
         await refresh();
       }); }}
     />

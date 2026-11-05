@@ -466,6 +466,11 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
       // Fallback to synthesized WAV if mic is unavailable in preview iframe
       mediaRecorderRef.current = null;
     }
+    if (CLOUD_MODE && !mediaRecorderRef.current) {
+      if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null; setIsRecordingVoice(false);
+      triggerToast('Permita acesso ao microfone para gravar áudio.');
+    }
   };
 
   const cancelVoiceRecording = () => {
@@ -498,49 +503,47 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
       recordingTimerRef.current = null;
     }
 
-    const sendAudioUrl = (dataUrl: string) => {
-      onSendMessage(
+    const sendAudioUrl = async (dataUrl: string) => {
+      if (await onSendMessage(
         activeThread.id,
         `🎤 Mensagem de voz (${durationFormatted})`,
-        `Audio_Voz_${new Date().toLocaleTimeString('pt-BR').replace(/:/g, '')}.wav`,
+        `Audio_Voz_${new Date().toLocaleTimeString('pt-BR').replace(/:/g, '')}.${dataUrl.startsWith('data:audio/webm') ? 'webm' : dataUrl.startsWith('data:audio/mp4') ? 'm4a' : 'wav'}`,
         `${Math.max(18, durationSec * 14)} KB`,
         {
           mediaType: 'audio',
           mediaUrl: dataUrl,
           audioDuration: durationFormatted,
         }
-      );
+      ) === false) { setIsRecordingVoice(false); return; }
       setIsRecordingVoice(false);
       setRecordingSeconds(0);
       triggerToast('🎤 Áudio de voz enviado na conversa!');
     };
+
+    const unavailable = () => { if (CLOUD_MODE) { setIsRecordingVoice(false); setRecordingSeconds(0); triggerToast('Não foi possível gravar o áudio. Nenhuma mensagem foi enviada.'); } else void sendAudioUrl(createSynthesizedWavDataUrl(durationSec)); };
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       const rec = mediaRecorderRef.current;
       rec.onstop = () => {
         rec.stream.getTracks().forEach((t) => t.stop());
         if (audioChunksRef.current.length > 0) {
-          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || 'audio/webm' });
           const reader = new FileReader();
           reader.onloadend = () => {
-            sendAudioUrl(
-              typeof reader.result === 'string'
-                ? reader.result
-                : createSynthesizedWavDataUrl(durationSec)
-            );
+            if (typeof reader.result === 'string') void sendAudioUrl(reader.result); else unavailable();
           };
           reader.readAsDataURL(blob);
         } else {
-          sendAudioUrl(createSynthesizedWavDataUrl(durationSec));
+          unavailable();
         }
       };
       try {
         rec.stop();
       } catch {
-        sendAudioUrl(createSynthesizedWavDataUrl(durationSec));
+        unavailable();
       }
     } else {
-      sendAudioUrl(createSynthesizedWavDataUrl(durationSec));
+      unavailable();
     }
   };
 
@@ -551,6 +554,7 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
   ) => {
     const file = e.target.files?.[0];
     if (!file || !activeThread) return;
+    if (CLOUD_MODE && file.size > 3 * 1024 * 1024) { triggerToast('Escolha um arquivo de até 3 MB.'); e.target.value = ''; return; }
 
     const sizeKB = Math.max(1, Math.round(file.size / 1024));
     const sizeLabel =
@@ -564,7 +568,7 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
     }
 
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : '';
       const defaultCaption =
         detectedType === 'image'
@@ -575,7 +579,7 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
           ? `🎤 Áudio compartilhado: ${file.name}`
           : `📄 Documento anexado: ${file.name}`;
 
-      onSendMessage(
+      if (await onSendMessage(
         activeThread.id,
         messageText.trim() || defaultCaption,
         file.name,
@@ -583,9 +587,9 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
         {
           mediaType: detectedType,
           mediaUrl: dataUrl,
-          audioDuration: detectedType === 'audio' ? '0:12' : undefined,
+          audioDuration: undefined,
         }
-      );
+      ) === false) return;
       setMessageText('');
       setShowAttachMenu(false);
       triggerToast(`✓ Arquivo "${file.name}" enviado com sucesso!`);
@@ -1507,7 +1511,7 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
                   QUICK REPLIES & MEDIA SHORTCUT BAR
               =============================================================== */}
               <div className="px-3 py-1.5 bg-[#F0F2F5] border-t border-gray-200 flex items-center gap-1.5 overflow-x-auto">
-                <button
+                {!CLOUD_MODE && <><button
                   type="button"
                   onClick={handleSendSampleVideo}
                   className="text-[11px] font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-full whitespace-nowrap inline-flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
@@ -1522,7 +1526,7 @@ export const WhatsAppChatPresentation: React.FC<WhatsAppChatViewProps> = ({
                 >
                   <ImageIcon className="w-3 h-3" />
                   <span>+ Foto Frota</span>
-                </button>
+                </button></>}
                 {[
                   '✅ Recebido, já estamos providenciando!',
                   '🚛 Manifesto e CT-e conferidos e liberados.',

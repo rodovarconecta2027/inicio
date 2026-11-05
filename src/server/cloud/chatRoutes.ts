@@ -15,7 +15,16 @@ export function registerCloudChatRoutes(app: Express, guard: RequestHandler, ser
     key: String(req.headers['x-idempotency-key'] || ''),
   })));
   app.post('/api/cloud/chat/conversations/:id/messages', guard, route(req =>
-    service.send(req.sessionUser.id, req.params.id, req.body?.text, String(req.headers['x-idempotency-key'] || ''))));
+    service.send(req.sessionUser.id, req.params.id, req.body?.text, String(req.headers['x-idempotency-key'] || ''), req.body?.attachment)));
+  app.get('/api/cloud/chat/messages/:id/attachment', guard, async (req: any, res, next) => {
+    try {
+      const file = await service.attachment(req.sessionUser.id, req.params.id);
+      res.attachment(file.name).type(file.mime);
+      if (file.mediaType !== 'document') res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      res.send(file.bytes);
+    } catch (error) { next(error); }
+  });
   app.post('/api/cloud/chat/conversations/:id/read', guard, route(req =>
     service.read(req.sessionUser.id, req.params.id, req.body?.sequence)));
   app.patch('/api/cloud/chat/messages/:id', guard, route(req =>

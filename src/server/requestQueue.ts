@@ -72,6 +72,18 @@ export function registerRequestQueue(app: Express, guard: any, users: () => Empl
     if (!hasPagePermission(u, 'solicitacoes')) return fail(res, 'Sem acesso à fila.', 403);
     res.setHeader('Cache-Control', 'no-store');
     const activeUsers = users().filter(person => person.active && person.approvalStatus === 'APROVADO');
+    let slaChanged = false;
+    for (const request of state.requests) {
+      const due = request.currentDueAtIso || request.originalDueAtIso;
+      if (terminal(request) || !due || !Number.isFinite(Date.parse(due)) || Date.parse(due) > Date.now() || request.slaLastEscalatedDueAtIso === due) continue;
+      request.slaLastEscalatedDueAtIso = due;
+      request.slaBreachedAtIso = new Date().toISOString();
+      request.escalatedToDiretoria = true;
+      request.history.push({id:crypto.randomUUID(),timestamp:request.slaBreachedAtIso,actorName:'Sistema',action:'Prazo SLA vencido — revisão administrativa solicitada',note:'Prazo original preservado. Vencimento: '+due});
+      for (const person of activeUsers.filter(person => person.accessLevel === 'ADMINISTRADOR' || person.id === request.assignedToId && canHandleRequest(person,request) && hasPagePermission(person,'solicitacoes'))) notify(request,person.id,'Prazo vencido: '+request.protocol,'sla:'+request.id+':'+due);
+      slaChanged = true;
+    }
+    if (slaChanged) save();
     res.json({ handlers: activeUsers.filter(person => person.accessProfile === 'RH').map(person => ({id:person.id,name:person.name})), requests: state.requests.filter(r => visible(u, r)), notifications: state.notifications.filter(n => n.recipientId === u.id), routing: {
       rhActive: activeUsers.filter(person => person.accessProfile === 'RH').length,
       financeActive: activeUsers.filter(person => person.accessProfile === 'FINANCEIRO').length,

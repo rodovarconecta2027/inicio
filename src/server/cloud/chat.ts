@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { hasPagePermission } from '../../lib/permissions.js';
 import type { Employee } from '../../types';
+import { moduleAssets, parseAssetDataUrl } from './moduleAssets.js';
 
 const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -30,7 +31,13 @@ export class FirestoreChatService {
       let query = this.db.collection('messages').where('conversationId', '==', conversationId).orderBy('sequence', 'desc').limit(40);
       if (before !== undefined) query = query.startAfter(before);
       const result = await tx.get(query);
-      return result.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      return result.docs.map(doc => {
+        const data = doc.data(), { attachment, ...message } = data;
+        return { id: doc.id, ...message, ...(!data.deleted && attachment ? { attachment: {
+          name: attachment.name, size: attachment.size, mimeType: attachment.mimeType,
+          mediaType: attachment.mediaType, url: `/api/cloud/chat/messages/${doc.id}/attachment`,
+        } } : {}) };
+      });
     });
   }
 
@@ -91,8 +98,12 @@ export class FirestoreChatService {
     });
   }
 
-  async send(uid: string, conversationId: string, text: string, key: string) {
-    if (typeof text !== 'string' || !text.trim() || text.length > 2000 || !identifier(key)) fail('Informe mensagem de até 2.000 caracteres e identificador de envio.');
+  async send(uid: string, conversationId: string, text: string, key: string, attachment?: {name: string; dataUrl: string}) {
+    if (typeof text !== 'string' || (!text.trim() && !attachment) || text.length > 2000 || !identifier(key)) fail('Informe mensagem de até 2.000 caracteres e identificador de envio.');
+    const parsed = attachment ? parseAssetDataUrl(attachment.dataUrl) : undefined;
+    const name = attachment ? String(attachment.name || '').replace(/[\r\n<>"/\\]/g, '_').slice(0, 160) : '';
+    if (attachment && !name.trim()) fail('Informe o nome do arquivo.');
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify([text.trim(), name, parsed?.mime || '', parsed ? crypto.createHash('sha256').update(parsed.bytes).digest('hex') : ''])).digest('hex');
     const id = crypto.createHash('sha256').update(JSON.stringify([conversationId, uid, key])).digest('hex');
     return this.db.runTransaction(async tx => {
       await this.member(tx, uid, conversationId);
@@ -102,15 +113,32 @@ export class FirestoreChatService {
       const ref = this.db.collection('messages').doc(id);
       const existing = await tx.get(ref);
       if (existing.exists) {
-        if (existing.data()!.text !== text.trim()) fail('Este envio já foi usado para outra mensagem.', 409);
-        return { id, ...existing.data() };
+        if (existing.data()!.requestHash ? existing.data()!.requestHash !== requestHash : existing.data()!.text !== text.trim() || attachment) fail('Este envio já foi usado para outra mensagem.', 409);
+        return { id, sequence: existing.data()!.sequence };
       }
       const sequence = Number(conversation.data()!.messageCount || 0) + 1;
       const now = new Date().toISOString();
-      const message = { conversationId, senderId: uid, text: text.trim(), sequence, createdAtIso: now, editedAtIso: null, deleted: false };
+      const assets = moduleAssets(tx, this.db, 'chat:' + conversationId);
+      const mediaType = parsed?.mime.startsWith('image/') ? 'image' : parsed?.mime.startsWith('audio/') ? 'audio' : parsed?.mime.startsWith('video/') ? 'video' : 'document';
+      const stored = parsed ? { name, size: parsed.bytes.length, mimeType: parsed.mime, mediaType, privateAsset: assets.store(parsed.bytes, parsed.mime) } : undefined;
+      await assets.persist();
+      const message = { conversationId, senderId: uid, text: text.trim(), sequence, createdAtIso: now, editedAtIso: null, deleted: false, requestHash,
+        ...(stored ? { attachment: stored } : {}) };
       tx.create(ref, message);
-      tx.update(conversationRef, { messageCount: sequence, lastMessage: text.trim().slice(0, 160), updatedAtIso: now });
-      return { id, ...message };
+      tx.update(conversationRef, { messageCount: sequence, lastMessage: (text.trim() || name).slice(0, 160), updatedAtIso: now });
+      return { id, sequence };
+    });
+  }
+
+  async attachment(uid: string, messageId: string) {
+    if (!identifier(messageId)) fail('Mensagem inválida.');
+    return this.db.runTransaction(async tx => {
+      const message = (await tx.get(this.db.collection('messages').doc(messageId))).data();
+      if (!message || message.deleted || !message.attachment) return fail('Arquivo não encontrado.', 404);
+      await this.member(tx, uid, message.conversationId);
+      const file = message.attachment;
+      const bytes = await moduleAssets(tx, this.db, 'chat:' + message.conversationId).read(file.privateAsset);
+      return { bytes, name: file.name, mime: file.mimeType, mediaType: file.mediaType };
     });
   }
 

@@ -12,6 +12,7 @@ import { CloudAuthService, firebasePasswordVerifier } from './authService.js';
 import { registerCloudAuthRoutes, cloudSessionId } from './authRoutes.js';
 import { loadCloudIdentity } from './identity.js';
 import { registerCloudRoster } from './rosterRoutes.js';
+import { registerLegacyDocuments, legacyDocumentVisible } from '../legacyDocuments.js';
 
 /** Separate migration surface. Does not replace or impersonate the local API. */
 export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: { passwordVerifier?: (email: string, password: string) => Promise<string> } = {}) {
@@ -24,7 +25,10 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     const attachment = req.method === 'POST' && /^\/api\/cloud\/meus-fretes\/[A-Za-z0-9_-]+\/attachments$/.test(req.path);
     const requestAttachment = req.method === 'POST' && /^\/api\/cloud\/requests(?:\/[A-Za-z0-9_-]+\/response)?$/.test(req.path);
     const paymentReceipt = req.method === 'POST' && req.path === '/api/cloud/pagamentos/comprovantes';
-    (attachment || requestAttachment || paymentReceipt ? attachmentJson : standardJson)(req, res, next);
+    const corporateFile = ['POST', 'PUT'].includes(req.method) && /^\/api\/cloud\/(mural|agenda|rh-external|customer-covers)(\/|$)/.test(req.path);
+    const chatFile = req.method === 'POST' && /^\/api\/cloud\/chat\/conversations\/[A-Za-z0-9_-]+\/messages$/.test(req.path);
+    const backupRestore = req.method === 'POST' && /^\/api\/cloud\/admin\/backups\/operations\/(preview|restore)$/.test(req.path);
+    (attachment || requestAttachment || paymentReceipt || corporateFile || chatFile || backupRestore ? attachmentJson : standardJson)(req, res, next);
   });
   app.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -91,6 +95,11 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
     }
   };
   app.get('/api/cloud/session', guard, (req: any, res) => res.json({ authenticated: true, user: req.sessionUser }));
+  registerLegacyDocuments(app,guard,'/api/cloud/legacy-documents',async(user,url)=>{
+    if(user.accessLevel==='ADMINISTRADOR')return true;
+    const [mural,agenda]=await Promise.all([db.collection('portal_modules').doc('mural').get(),db.collection('portal_modules').doc('agenda').get()]);
+    return legacyDocumentVisible(user,url,mural.data(),agenda.data());
+  },async(user,id)=>{await db.collection('audit_logs').add({actorId:user.id,targetId:id,action:'LEGACY_DOCUMENT_DOWNLOADED',atIso:new Date().toISOString()});});
   registerCloudBrandingWrites(app, guard, db);
   registerOperationalBackup(app, guard, db);
   registerCloudChatRoutes(app, guard, new FirestoreChatService(db));
@@ -105,7 +114,7 @@ export function createCloudApi(runtime: { auth: Auth; db: Firestore }, options: 
   app.use((error: any, _req: any, res: any, _next: any) => {
     const status = [400, 401, 403, 404, 409, 413, 415, 429].includes(error.status) ? error.status : 503;
     if (status === 503) console.error('cloud_api_failure', { code: String(error?.code || 'UNAVAILABLE').slice(0, 80) });
-    res.status(status).json({ authenticated: false, error: status === 503 ? 'Serviço temporariamente indisponível. Tente novamente.' : error.message,
+    res.status(status).json({ authenticated: false, error: status === 503 ? 'Serviço temporariamente indisponível. Tente novamente.' : status === 413 ? 'O envio excedeu o limite da homologação. Reduza os arquivos para até 3 MB por envio.' : error.message,
       ...(error.code && status !== 503 ? { code: error.code } : {}),
       ...(error.locked !== undefined ? { locked: error.locked, blockedUntil: error.blockedUntil, serverNow: Date.now(), remainingSeconds: error.remainingSeconds } : {}),
     });

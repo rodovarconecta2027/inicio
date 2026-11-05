@@ -18,7 +18,7 @@ function validDocument(value:string) {
   return digit(value.slice(0,12),[5,4,3,2,9,8,7,6,5,4,3,2])===Number(value[12])&&digit(value.slice(0,13),[6,5,4,3,2,9,8,7,6,5,4,3,2])===Number(value[13]);
 }
 
-export function registerExternalRh(app:Express, guard:any, provider?:RhBillingProvider, remoteState?: Record<string, unknown>) {
+export function registerExternalRh(app:Express, guard:any, provider?:RhBillingProvider, remoteState?: Record<string, unknown>, selectedBank?: string) {
   const dir=path.join(process.env.RODOVAR_DATA_ROOT || process.cwd(),'data','rh-external');
   if (!remoteState) fs.mkdirSync(dir,{recursive:true});
   const keyFile=path.join(dir,'encryption.key');
@@ -33,11 +33,11 @@ export function registerExternalRh(app:Express, guard:any, provider?:RhBillingPr
   const rh=(req:any,res:any,next:any)=>canAccessExternalRh(req.sessionUser)?(res.setHeader('Cache-Control','no-store'),next()):fail(res,403,'Acesso exclusivo à permissão RH.');
   const find=(id:string)=>state.requests.find((r:any)=>r.id===id);
   const locks=new Set<string>();
-  const storeDoc=(r:any,name:string,mimeType:string,bytes:Buffer,kind:string,u:any)=>{
-    const id=crypto.randomUUID();fs.writeFileSync(path.join(dir,id+'.enc'),encrypt(bytes),{mode:0o600});
-    const doc={id,name:name.replace(/[\r\n<>"/\\]/g,'_').slice(0,150),mimeType,size:bytes.length,kind,at:new Date().toISOString()};r.documents.push(doc);audit(r,u,'Documento anexado: '+kind);return doc;
+  const storeDoc=(r:any,name:string,mimeType:string,bytes:Buffer,kind:string,u:any,req?:any)=>{
+    const id=crypto.randomUUID(),privateAsset=req?.storeModuleFile?.(bytes,mimeType);if(!privateAsset){if(remoteState)throw Error('Armazenamento privado indisponível.');fs.writeFileSync(path.join(dir,id+'.enc'),encrypt(bytes),{mode:0o600});}
+    const doc={id,...(privateAsset?{privateAsset}:{}),name:name.replace(/[\r\n<>"/\\]/g,'_').slice(0,150),mimeType,size:bytes.length,kind,at:new Date().toISOString()};r.documents.push(doc);audit(r,u,'Documento anexado: '+kind);return doc;
   };
-  app.get('/api/rh-external',guard,rh,(_req,res)=>res.json({requests:state.requests,services:state.services,provider:{configured:!!provider,name:provider?.name || null}}));
+  app.get('/api/rh-external',guard,rh,(_req,res)=>res.json({requests:state.requests,services:state.services,provider:{configured:!!provider,name:provider?.name || selectedBank || null}}));
   app.post('/api/rh-external',guard,rh,(req:any,res)=>{
     const b=req.body||{}, name=String(b.clientName||'').trim(), document=String(b.document||'').replace(/\D/g,''), service=String(b.service||'').trim(), reference=String(b.reference||'').trim(), email=String(b.email||'').trim(), dueDate=String(b.dueDate||'');
     const amountCents=b.amountCents, idempotency=String(req.headers['x-idempotency-key']||'');
@@ -108,10 +108,10 @@ export function registerExternalRh(app:Express, guard:any, provider?:RhBillingPr
     const valid=match[1]==='application/pdf'?bytes.subarray(0,5).toString()==='%PDF-':match[1]==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
     if(!valid||bytes.length>5*1024*1024)return fail(res,400,'Formato inválido ou arquivo maior que 5 MB.');
     const hash=crypto.createHash('sha256').update(bytes).digest('hex');if(r.documents.some((d:any)=>d.hash===hash))return res.json({request:r});
-    const doc=storeDoc(r,name,match[1],bytes,kind,req.sessionUser);Object.assign(doc,{hash});save();res.status(201).json({request:r});
+    const doc=storeDoc(r,name,match[1],bytes,kind,req.sessionUser,req);Object.assign(doc,{hash});save();res.status(201).json({request:r});
   });
-  app.get('/api/rh-external/:id/documents/:documentId',guard,rh,(req:any,res)=>{
+  app.get('/api/rh-external/:id/documents/:documentId',guard,rh,async(req:any,res)=>{
     const r=find(req.params.id),doc=r?.documents.find((d:any)=>d.id===req.params.documentId);if(!doc)return fail(res,404,'Documento não encontrado.');
-    audit(r,req.sessionUser,'Download de documento: '+doc.kind);save();res.setHeader('X-Content-Type-Options','nosniff');res.type(doc.mimeType).attachment(doc.name).send(decrypt(fs.readFileSync(path.join(dir,doc.id+'.enc'))));
+    audit(r,req.sessionUser,'Download de documento: '+doc.kind);save();if(req.sendModuleFile){await req.sendModuleFile(doc);return;}res.setHeader('X-Content-Type-Options','nosniff');res.type(doc.mimeType).attachment(doc.name).send(decrypt(fs.readFileSync(path.join(dir,doc.id+'.enc'))));
   });
 }

@@ -2,6 +2,7 @@ import {registerCustomerCovers} from './src/server/customerCovers';
 import {registerDrivers} from './src/server/drivers';
 import {registerAgenda} from './src/server/agenda';
 import {registerMural} from './src/server/mural';
+import {registerLegacyDocuments,registerLegacyDocumentRedirects,legacyDocumentVisible} from './src/server/legacyDocuments';
 import { registerExternalRh } from './src/server/externalRh';
 import { hasPagePermission, canOperateMonitoring } from './src/lib/permissions';
 import { AUTHORIZED_ROSTER, PROFILE_MODULES } from './src/lib/accessPolicy';
@@ -2825,6 +2826,8 @@ export async function createPortalApp(options: { serveFrontend?: boolean } = {})
   registerAccountDeletionRoutes(app, requireAdminSession, dbState, saveDatabase);
   registerAgenda(app, requireApprovedSession, () => dbState.users);
   registerMural(app, requireApprovedSession, dbState, () => saveDatabase(dbState), INITIAL_ANNOUNCEMENTS);
+  registerLegacyDocumentRedirects(app,'/api/legacy-documents');
+  registerLegacyDocuments(app,requireApprovedSession,'/api/legacy-documents',async(user,url)=>legacyDocumentVisible(user,url,(dbState as any).mural,undefined));
   registerExternalRh(app, requireApprovedSession);
   registerRequestQueue(app, requireApprovedSession, () => dbState.users, INITIAL_REQUESTS);
   app.post('/api/admin/first-access/:uid', requireAdminSession, (req: AuthenticatedRequest, res) => {

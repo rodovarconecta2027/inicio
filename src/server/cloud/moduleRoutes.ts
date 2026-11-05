@@ -12,6 +12,8 @@ import { registerDrivers } from '../drivers.js';
 import { registerPaymentReceiptRoutes, withPaymentStore } from '../paymentReceiptsEngine.js';
 import { financialProjection } from '../financialProjection.js';
 import { presentOfficialNames } from './presentNames.js';
+import { moduleAssets, rejectAssetReferences } from './moduleAssets.js';
+import { registerCustomerCovers } from '../customerCovers.js';
 import { hasPagePermission, canConfirmFreightPayment } from '../../lib/permissions.js';
 
 const fail = (message: string, status = 503): never => { throw Object.assign(Error(message), { status }); };
@@ -127,7 +129,8 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
   app.delete('/api/cloud/admin/users/:userId', guard, adminGuard, accountAction('EXCLUIR'));
 
   const modules = [
-    { name: 'rh-external', page: 'solicitacoes', initial: () => ({ clients: [], services: [], requests: [], keys: {}, events: {} }), mount: (r: any, s: any) => registerExternalRh(r, guard, undefined, s) },
+    { name: 'customer-covers', page: 'fretes_ativos', initial: () => ({ customerCovers: [], auditLogs: [] }), mount: (r: any, s: any) => registerCustomerCovers(r, guard, s, () => {}) },
+    { name: 'rh-external', page: 'solicitacoes', initial: () => ({ clients: [], services: [], requests: [], keys: {}, events: {} }), mount: (r: any, s: any) => registerExternalRh(r, guard, undefined, s, process.env.RODOVAR_RH_BILLING_PROVIDER === 'C6_BANK' ? 'C6 Bank' : undefined) },
     { name: 'drivers', page: '', initial: () => ({ drivers: [], driverAudit: [], accessPolicy: {} }), mount: (r: any, s: any, users: any[]) => registerDrivers(r, guard, adminGuard, { ...s, accessPolicy: { protectedAdminUid: users.find(u => u.accessLevel === 'ADMINISTRADOR')?.id } }, () => {}) },
     { name: 'finance', page: 'financeiro', initial: () => ({ freights: [], intents: [], receipts: [], history: [], stagedShares: [] }), mount: (r: any, s: any) => withPaymentStore(s, () => registerPaymentReceiptRoutes(r, guard, () => {}, { remote: true })) },
     { name: 'agenda', page: 'agenda', initial: () => ({ events: [], notifications: [], imported: true, keys: {} }), mount: (r: any, s: any, users: any[]) => registerAgenda(r, guard, () => users, s) },
@@ -149,7 +152,8 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
         if (module.name === 'rh-external' && !canAccessExternalRh(req.sessionUser)) { res.status(403).json({ error: 'Acesso exclusivo ao RH.' }); return; }
         const receiptUpload = module.name === 'finance' && route.path === '/api/pagamentos/comprovantes';
         if (receiptUpload && !req.is('application/json')) { res.status(415).json({ error: 'Use o envio de comprovantes pela interface do Financeiro.' }); return; }
-        if ((module.name === 'rh-external' && route.path.includes('/documents')) || (module.name !== 'requests' && route.path.includes('/attachments/')) || /\/shared-staging(\/|$)/.test(route.path) || route.path.endsWith('/document') || (module.name !== 'requests' && !receiptUpload && JSON.stringify(req.body || {}).includes('data:'))) {
+        const corporateFiles = ['mural', 'agenda', 'rh-external', 'customer-covers'].includes(module.name);
+        if (/\/shared-staging(\/|$)/.test(route.path) || route.path.endsWith('/document') || (!corporateFiles && module.name !== 'requests' && !receiptUpload && JSON.stringify(req.body || {}).includes('data:'))) {
           res.status(503).json({ error: 'Armazenamento de anexos ainda não configurado. Nenhuma alteração foi salva.', code: 'STORAGE_NOT_CONFIGURED' }); return;
         }
         const mutation = req.method !== 'GET', rawKey = String(req.headers['x-idempotency-key'] || '');
@@ -157,6 +161,8 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
         const keyRef = db.collection('operation_keys').doc(hash(`${req.sessionUser.id}:${req.method}:${req.path}:${rawKey}`));
         const fingerprint = hash(JSON.stringify(req.body || {}));
         const result = await db.runTransaction(async tx => {
+          const assets = moduleAssets(tx, db, 'module:' + module.name);
+          rejectAssetReferences(req.body);
           const users = await cloudDirectory(db, tx), actor = users.find((u: any) => u.id === req.sessionUser.id);
           if (!actor?.active || actor.approvalStatus !== 'APROVADO' || (module.page && !hasPagePermission(actor, module.page))) fail('Conta sem autorização para este módulo.', 403);
           if (module.name === 'rh-external' && !canAccessExternalRh(actor)) fail('Acesso exclusivo ao RH.', 403);
@@ -165,7 +171,7 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
             const previous = await tx.get(keyRef);
             if (previous.exists) {
               if (previous.data()!.fingerprint !== fingerprint) fail('Identificador reutilizado com dados diferentes.', 409);
-              return previous.data()!.response;
+              return assets.decode(previous.data()!.response);
             }
           }
           const ref = db.collection('portal_modules').doc(module.name), snapshot = await tx.get(ref);
@@ -189,13 +195,18 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           }
           const handler = capture(r => module.mount(r, state, users)).find(r => r.method === route.method && r.path === route.path);
           let status = 200, response: any;
-          const out: any = { setHeader() {}, status(n: number) { status = n; return out; }, json(body: any) { response = { status, body: clean(body) }; return out; } };
+          const out: any = { setHeader() {}, status(n: number) { status = n; return out; }, sendStatus(n: number) { response = { status: n, body: { error: 'Operação não autorizada.' } }; return out; }, json(body: any) { response = { status, body: clean(body) }; return out; } };
           let upload: { recordId: string; name: string; bytes: Buffer } | undefined;
           const readReceipt = (receipt: PaymentReceiptRecord) => readPrivateFile(tx, db, {
             freightId: receipt.freightId, storageName: receipt.storageFileName,
             sizeBytes: receipt.sizeBytes, mimeType: receipt.mimeType,
           });
           const request = {
+            storeModuleFile: (bytes: Buffer, mime: string) => assets.store(bytes, mime),
+            async sendModuleFile(file: any) {
+              if (!file.privateAsset) fail('O arquivo precisa ser enviado novamente pelo módulo.', 404);
+              response = { file: await assets.read(file.privateAsset), fileName: file.name, mimeType: file.mimeType };
+            },
             isPaymentFreightBlocked: (freightId: string) => blockedFinancialFreights.has(freightId),
             savePaymentReceipt(receipt: PaymentReceiptRecord, bytes: Buffer) {
               upload = { recordId: receipt.freightId, name: receipt.storageFileName, bytes };
@@ -223,18 +234,23 @@ export function registerCloudModuleRoutes(app: Express, guard: RequestHandler, d
           };
           if (module.name === 'finance') await withPaymentStore(state as any, () => execute(0)); else await execute(0);
           if (!response) fail('Resposta do módulo indisponível.');
-          if (response.file) return response;
-          response.body = presentOfficialNames(response.body,
+          if (!response.file) response.body = presentOfficialNames(response.body,
             new Map(users.map((person: any) => [person.id, person.name])));
-          if (response.status < 400) {
+          if (response.file || response.status < 400) {
+            const encodedState = assets.encode(state);
+            const encodedResponse = response.file ? response : assets.encode(response);
+            const output = response.file ? response : await assets.decode(encodedResponse);
+            if (assets.hasUploads && upload) fail('Envie os arquivos em operações separadas.', 400);
+            await assets.persist();
             if (upload) await writePrivateFiles(tx, db, upload.recordId, upload, []);
-            const after = JSON.stringify(state);
+            const after = JSON.stringify(encodedState);
             if (Buffer.byteLength(after) > 850000) fail('O módulo atingiu o limite de homologação. Nenhum registro foi apagado; é necessário particionar a persistência.');
-            if (after !== before) tx.set(ref, clean(state));
+            if (after !== before) tx.set(ref, clean(encodedState));
             if (mutation) {
-              tx.create(keyRef, { fingerprint, actorId: actor.id, response, atIso: new Date().toISOString() });
+              tx.create(keyRef, { fingerprint, actorId: actor.id, response: encodedResponse, atIso: new Date().toISOString() });
               tx.create(db.collection('audit_logs').doc(), { actorId: actor.id, action: `${req.method} ${req.path}`, atIso: new Date().toISOString() });
             }
+            return output;
           }
           return response;
         });

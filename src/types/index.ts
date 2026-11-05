@@ -216,6 +216,8 @@ export interface InternalRequest {
   currentDueAtIso: string;
   attachmentName?: string;
   escalatedToDiretoria?: boolean;
+  slaLastEscalatedDueAtIso?: string;
+  slaBreachedAtIso?: string;
   history: RequestHistoryEntry[];
 }
 
