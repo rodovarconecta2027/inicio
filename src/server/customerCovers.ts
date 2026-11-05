@@ -1,5 +1,5 @@
 import {Express} from 'express';
-import {canAccessMonitoramentoFreights,canOperateMonitoring} from '../lib/permissions';
+import {canAccessMonitoramentoFreights,canOperateMonitoring} from '../lib/permissions.js';
 export const customerCoverKey=(name:string)=>String(name||'').normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('pt-BR');
 export function registerCustomerCovers(app:Express,guard:any,db:any,save:()=>void){
  const allowed=(u:any)=>canAccessMonitoramentoFreights(u);
